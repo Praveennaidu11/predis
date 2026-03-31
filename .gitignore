@@ -23,8 +23,4 @@
 
 # IDE files
 .vscode/
-.idea/
-
-# Temp files
-Predis-Amealio-Backend/temp/
-*.mp4
+.idea/Predis-Amealio-Backend/temp/*.mp4

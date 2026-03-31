@@ -37,6 +37,9 @@ export class User {
   @Column({ name: 'google_id', unique: true, nullable: true })
   googleId: string;
 
+  @Column({ name: 'facebook_id', unique: true, nullable: true })
+  facebookId: string;
+
   @Column({ name: 'profile_image', nullable: true })
   profileImage: string;
 

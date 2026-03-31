@@ -2,8 +2,9 @@ import { apiClient } from '../api';
 
 export interface CreateVideoDto {
   prompt: string;
-  type: 'text' | 'image' | 'multi-image';
+  type: 'text' | 'image' | 'multi-image' | 'audio';
   images?: string[];
+  audio?: string;
   duration: number;
   model: string;
   platform?: string;

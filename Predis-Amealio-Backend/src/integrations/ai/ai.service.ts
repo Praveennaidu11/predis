@@ -136,6 +136,101 @@ export class AIService {
     }
   }
 
+  /** Hosted generator expects `text-to-video` / `image-to-video`, not DTO enums like `text`. */
+  private mapVideoTypeForExternalApi(
+    internalType: string | undefined,
+    hasImages: boolean,
+  ): string {
+    if (hasImages) {
+      return 'image-to-video';
+    }
+    const t = (internalType || 'text').toLowerCase();
+    if (t === 'image' || t === 'multi-image') {
+      return 'image-to-video';
+    }
+    return 'text-to-video';
+  }
+
+  private extractVideoUrlFromResponse(data: any): string {
+    if (!data) {
+      throw new Error('No video URL returned from video generation API');
+    }
+    if (typeof data === 'string') {
+      return data;
+    }
+    if (Array.isArray(data)) {
+      if (data.length === 0) {
+        throw new Error('Empty videos array from video generation API');
+      }
+      const first = data[0];
+      if (typeof first === 'string') {
+        return first;
+      }
+      if (first && typeof first === 'object') {
+        const u =
+          first.url ||
+          first.video_url ||
+          first.s3_url ||
+          first.href;
+        if (typeof u === 'string') {
+          return u;
+        }
+      }
+    }
+    if (typeof data === 'object') {
+      const u =
+        data.video_url ||
+        data.url ||
+        data.s3_url ||
+        data.href;
+      if (typeof u === 'string') {
+        return u;
+      }
+    }
+    throw new Error(
+      'Video generation API returned a response without a usable video URL',
+    );
+  }
+
+  private formatVideoApiError(error: any): string {
+    const d = error?.response?.data;
+    if (d == null) {
+      return error?.message || String(error);
+    }
+    if (typeof d === 'string') {
+      return d;
+    }
+    if (typeof d === 'object') {
+      const msg =
+        d.detail ||
+        d.message ||
+        d.error ||
+        d.msg;
+      if (typeof msg === 'string') {
+        return msg;
+      }
+      try {
+        return JSON.stringify(d).slice(0, 800);
+      } catch {
+        return error?.message || 'Unknown';
+      }
+    }
+    return error?.message || String(error);
+  }
+
+  private inferHttpStatusForVideoError(detail: string): number {
+    const d = (detail || '').toLowerCase();
+    // Upstream sometimes wraps a 402 into a 500 body; surface as 402 for UI.
+    if (d.includes('payment required') || d.includes('pre-paid credits') || d.includes('prepaid credits')) {
+      return HttpStatus.PAYMENT_REQUIRED;
+    }
+    // Cloudflare timeout from generator
+    if (d.includes('error code 524') || d.includes('a timeout occurred') || d.includes('status code 524')) {
+      return HttpStatus.GATEWAY_TIMEOUT;
+    }
+    return HttpStatus.INTERNAL_SERVER_ERROR;
+  }
+
   /* ----------------------------------------------------------
       VIDEO GENERATION (External text-to-video API)
     ---------------------------------------------------------- */
@@ -147,8 +242,9 @@ export class AIService {
       videoType?: string;
       platform?: string;
       images?: string[];
+      audio?: string;
     }
-  ): Promise<string | string[]> {
+  ): Promise<string> {
     try {
       // Map frontend model names to API expected values ('local' or 'hf')
       let apiModel = 'local';
@@ -167,41 +263,60 @@ export class AIService {
        */
       const numClips = 1;
 
-      // Option A: allow routing "long duration" requests to a different endpoint/provider.
-      // Many providers cap the default endpoint to a short preview length.
       const longVideoApiUrl =
         this.configService.get<string>('TEXT_TO_VIDEO_API_URL_LONG') ||
         this.configService.get<string>('VIDEO_API_URL_LONG') ||
         '';
       const videoApiUrlToUse = duration > 5 && longVideoApiUrl ? longVideoApiUrl : this.videoApiUrl;
 
+      const hasImages = !!(options.images && options.images.length > 0);
+      const externalVideoType = this.mapVideoTypeForExternalApi(
+        options.videoType,
+        hasImages,
+      );
+
       const payload: any = {
         prompt,
-        // Option C: send multiple duration keys for compatibility across providers.
-        // Some APIs expect `duration`, others `seconds`/`length`/`duration_seconds`.
         duration: duration,
         duration_seconds: duration,
         seconds: duration,
         length: duration,
         num_clips: numClips,
         model: apiModel,
-        video_type: options.videoType || 'text-to-video',
+        video_type: externalVideoType,
         platform: options.platform || 'instagram',
       };
-
-      this.logger.log(
-        `Sending video generation request to ${videoApiUrlToUse} with payload: ${JSON.stringify(payload)}`,
-      );
 
       if (options.images && options.images.length > 0) {
         payload.images = options.images;
       }
 
+      if (options.audio) {
+        payload.audio = options.audio;
+      }
+
+      const logSummary = {
+        ...payload,
+        images: payload.images
+          ? `[${payload.images.length} image(s), base64 omitted]`
+          : undefined,
+        audio: payload.audio ? '[omitted]' : undefined,
+      };
+      this.logger.log(
+        `Sending video generation request to ${videoApiUrlToUse} with payload: ${JSON.stringify(logSummary)}`,
+      );
+
       const response = await axios.post(videoApiUrlToUse, payload, {
-        timeout: 300000, // Video generation can be slow
+        timeout: 300000,
       });
 
-      // Log a small, safe summary of the response to diagnose duration issues.
+      if (
+        typeof response.data === 'string' &&
+        /^https?:\/\//i.test(response.data.trim())
+      ) {
+        return response.data.trim();
+      }
+
       try {
         const summary = {
           keys: response.data ? Object.keys(response.data) : [],
@@ -217,25 +332,31 @@ export class AIService {
                   : response.data?.s3_url
                     ? 's3_url'
                     : typeof response.data,
-          videosCount: Array.isArray(response.data?.videos) ? response.data.videos.length : undefined,
+          videosCount: Array.isArray(response.data?.videos)
+            ? response.data.videos.length
+            : undefined,
         };
         this.logger.log(`Video API response summary: ${JSON.stringify(summary)}`);
       } catch {
-        // ignore logging failures
+        // ignore
       }
 
-      const videoData = response.data?.video_url || response.data?.videos || response.data?.url || response.data?.s3_url;
+      const raw =
+        response.data?.video_url ||
+        response.data?.videos ||
+        response.data?.url ||
+        response.data?.s3_url ||
+        response.data?.result ||
+        response.data?.output;
 
-      if (!videoData) {
-        throw new Error('No video URL returned from video generation API');
-      }
-
-      return videoData;
+      return this.extractVideoUrlFromResponse(raw);
     } catch (error: any) {
-      this.logger.error('Video generation error', error.response?.data || error.message);
+      const detail = this.formatVideoApiError(error);
+      this.logger.error(`Video generation error: ${detail}`);
+      const status = this.inferHttpStatusForVideoError(detail);
       throw new HttpException(
-        `Failed to generate video: ${error.message}`,
-        HttpStatus.INTERNAL_SERVER_ERROR
+        `Failed to generate video: ${detail}`,
+        status,
       );
     }
   }
