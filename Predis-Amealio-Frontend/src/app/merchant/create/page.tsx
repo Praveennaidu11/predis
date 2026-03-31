@@ -6,11 +6,35 @@
  import { Button } from '@/components/ui/button'; 
  import { Textarea } from '@/components/ui/textarea'; 
  import { Input } from '@/components/ui/input'; 
- import { Copy, RefreshCw, Save, Video, Loader2 } from 'lucide-react'; 
+ import { 
+   Copy, 
+   RefreshCw, 
+   Save, 
+   Video, 
+   Loader2, 
+   Plus, 
+   Image as ImageIcon, 
+   FileVideo, 
+   FileText, 
+   X, 
+   Mic, 
+   ArrowUp, 
+   Paperclip, 
+   Sparkles, 
+   Brain, 
+   Search, 
+   MoreHorizontal 
+ } from 'lucide-react'; 
  import { toast } from 'sonner'; 
  import { contentApi, ContentItem } from '@/lib/api/content'; 
- import { videoApi } from '@/lib/api/video';
+ import { videoApi } from '@/lib/api/video'; 
  import { useSearchParams } from 'next/navigation'; 
+ import { 
+   DropdownMenu, 
+   DropdownMenuContent, 
+   DropdownMenuItem, 
+   DropdownMenuTrigger, 
+ } from '@/components/ui/dropdown-menu'; 
  
  // ------------ TYPES ------------ 
  type ContentType = 'text' | 'image' | 'video'; 
@@ -143,6 +167,24 @@
    const [aiSuggestions, setAiSuggestions] = useState<string[]>([]); 
    const [suggestionsLoading, setSuggestionsLoading] = useState(false); 
  
+   const [selectedFiles, setSelectedFiles] = useState<{ 
+     type: 'image' | 'video' | 'doc'; 
+     file: File; 
+     preview: string; 
+   }[]>([]); 
+ 
+   // Audio Recording State
+   const [isRecording, setIsRecording] = useState(false);
+   const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
+   const [audioPreview, setAudioPreview] = useState<string | null>(null);
+   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+   const audioChunksRef = useRef<Blob[]>([]);
+   const recognitionRef = useRef<any>(null);
+
+   const imageInputRef = useRef<HTMLInputElement>(null); 
+   const videoInputRef = useRef<HTMLInputElement>(null); 
+   const docInputRef = useRef<HTMLInputElement>(null); 
+ 
    const [isEditing, setIsEditing] = useState(false); 
    const [loadedItem, setLoadedItem] = useState<ContentItem | null>(null); 
  
@@ -183,8 +225,8 @@
          setPrompt(item.prompt || ''); 
  
          if (item.generatedText) setOutput(item.generatedText); 
-         else if (item.generatedImage) setOutput(item.generatedImage); 
-         else if (item.generatedVideo) setOutput(item.generatedVideo); 
+        else if (item.generatedImage) setOutput(normalizeMediaUrl(item.generatedImage) || item.generatedImage); 
+        else if (item.generatedVideo) setOutput(normalizeMediaUrl(item.generatedVideo) || item.generatedVideo); 
        } catch (err: any) { 
          console.error('Failed to load content for editing:', err); 
          toast.error(err.message || 'Failed to load content'); 
@@ -276,7 +318,7 @@
        } finally { 
          if (!cancelled) setSuggestionsLoading(false); 
        } 
-     }, 550); 
+     }, 400); 
  
      return () => { 
        cancelled = true; 
@@ -356,36 +398,200 @@
      queueMicrotask(() => promptRef.current?.focus()); 
    }; 
 
-   async function pollVideoStatus(id: string) {
-     pollIntervalRef.current = setInterval(async () => {
-       try {
-         const response = await videoApi.getVideoStatus(id);
-         const video = response.data;
-         if (video.status === 'done' && video.videoUrl) {
-           clearInterval(pollIntervalRef.current!);
-           let finalUrl = video.videoUrl;
-           if (finalUrl.startsWith('/')) {
-             finalUrl = `${process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8001'}${finalUrl}`;
-           }
-           setOutput(finalUrl);
-           setLoading(false);
-           setJobId(null);
-           toast.success('Video generated successfully!');
-         } else if (video.status === 'failed') {
-           clearInterval(pollIntervalRef.current!);
-           setLoading(false);
-           setJobId(null);
-           toast.error('Video generation failed.');
-         }
-       } catch (err: any) {
-         clearInterval(pollIntervalRef.current!);
-         setLoading(false);
-         setJobId(null);
-         toast.error(err.response?.data?.message || 'Error polling video status');
-       }
-     }, 3000);
-   }
+  const getBackendBaseUrl = () =>
+    process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8001';
+
+  const normalizeMediaUrl = (url?: string) => {
+    if (!url) return undefined;
+    if (url.startsWith('data:')) return url;
+    if (url.startsWith('http://') || url.startsWith('https://')) return url;
+    const base = getBackendBaseUrl().replace(/\/$/, '');
+    const path = url.startsWith('/') ? url : `/${url}`;
+    return `${base}${path}`;
+  };
+
+  async function pollVideoStatus(id: string) {
+    pollIntervalRef.current = setInterval(async () => {
+      try {
+        const response = await videoApi.getVideoStatus(id);
+        const video = response.data;
+        if (video.status === 'done' && video.videoUrl) {
+          clearInterval(pollIntervalRef.current!);
+          setOutput(normalizeMediaUrl(video.videoUrl) || null);
+          setLoading(false);
+          setJobId(null);
+          toast.success('Video generated successfully!');
+        } else if (video.status === 'failed') {
+          clearInterval(pollIntervalRef.current!);
+          setLoading(false);
+          setJobId(null);
+          toast.error('Video generation failed.');
+        }
+      } catch (err: any) {
+        clearInterval(pollIntervalRef.current!);
+        setLoading(false);
+        setJobId(null);
+        toast.error(err.response?.data?.message || 'Error polling video status');
+      }
+    }, 3000);
+  }
  
+   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>, type: 'image' | 'video' | 'doc') => { 
+     const files = Array.from(e.target.files || []); 
+     if (files.length === 0) return; 
+ 
+     const newFiles = files.map(file => ({ 
+       type, 
+       file, 
+       preview: URL.createObjectURL(file) 
+     })); 
+ 
+     setSelectedFiles(prev => [...prev, ...newFiles]); 
+     toast.success(`${type.charAt(0).toUpperCase() + type.slice(1)} added!`); 
+     // Reset input value so same file can be selected again if removed 
+     e.target.value = ''; 
+   }; 
+ 
+   const removeFile = (index: number) => { 
+     setSelectedFiles(prev => { 
+       const fileToRemove = prev[index]; 
+       if (fileToRemove.preview.startsWith('blob:')) { 
+         URL.revokeObjectURL(fileToRemove.preview); 
+       } 
+       return prev.filter((_, i) => i !== index); 
+     }); 
+   }; 
+ 
+   // Audio Recording Handlers
+   const startRecording = async () => {
+     try {
+       // Check if browser supports mediaDevices
+       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+         toast.error('Your browser does not support audio recording. Please use a modern browser.');
+         return;
+       }
+
+       // SpeechRecognition is strict about HTTPS (except for localhost)
+       const isSecure = window.location.protocol === 'https:' || window.location.hostname === 'localhost';
+       if (!isSecure) {
+         toast.error('Microphone and speech features require a secure (HTTPS) connection.');
+         return;
+       }
+
+       // 1. Request Media Stream first (this is the most common permission trigger)
+       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+       
+       // 2. Once stream is granted, start MediaRecorder
+       const mediaRecorder = new MediaRecorder(stream);
+       mediaRecorderRef.current = mediaRecorder;
+       audioChunksRef.current = [];
+
+       mediaRecorder.ondataavailable = (event) => {
+         if (event.data.size > 0) {
+           audioChunksRef.current.push(event.data);
+         }
+       };
+
+       mediaRecorder.onstop = () => {
+         const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+         const url = URL.createObjectURL(blob);
+         setAudioBlob(blob);
+         setAudioPreview(url);
+         toast.success('Audio recorded!');
+       };
+
+       mediaRecorder.start();
+
+       // 3. Then start Speech Recognition (using the already-granted permission context)
+       const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+       if (SpeechRecognition) {
+         try {
+           const recognition = new SpeechRecognition();
+           recognition.continuous = true;
+           recognition.interimResults = true;
+           recognition.lang = 'en-US';
+
+           recognition.onresult = (event: any) => {
+             for (let i = event.resultIndex; i < event.results.length; ++i) {
+               if (event.results[i].isFinal) {
+                 setPrompt(prev => {
+                   const newText = event.results[i][0].transcript;
+                   return prev.endsWith(' ') || !prev ? prev + newText : prev + ' ' + newText;
+                 });
+               }
+             }
+           };
+
+           recognition.onerror = (event: any) => {
+             // Use warn/info instead of error to avoid triggering Next.js error overlay
+             console.warn('Speech recognition warning:', event.error);
+             
+             if (event.error === 'not-allowed') {
+               toast.error('Speech-to-text permission was not granted.');
+             } else if (event.error === 'network') {
+               toast.error('Speech-to-text network error.');
+             }
+             // Don't stop everything if just transcription fails, 
+             // let the user continue recording the audio file.
+           };
+
+           recognition.start();
+           recognitionRef.current = recognition;
+         } catch (recognitionErr) {
+           console.warn('Could not start speech recognition:', recognitionErr);
+         }
+       }
+
+       setIsRecording(true);
+     } catch (err: any) {
+       // Use warn instead of error to avoid triggering Next.js error overlay
+       console.warn('Error starting recording:', err);
+       
+       if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+         toast.error('Microphone access denied. Please enable microphone permissions in your browser settings.');
+       } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError' || err.message?.includes('device not found')) {
+         toast.error('No microphone found. Please connect a microphone and try again.');
+       } else {
+         toast.error('Could not access microphone. Please ensure your device is connected and permissions are granted.');
+       }
+       
+       // Ensure UI state is reset if recording failed to start
+       setIsRecording(false);
+       if (recognitionRef.current) {
+         recognitionRef.current.stop();
+         recognitionRef.current = null;
+       }
+     }
+   };
+
+   const stopRecording = () => {
+     if (mediaRecorderRef.current && isRecording) {
+       mediaRecorderRef.current.stop();
+       mediaRecorderRef.current.stream.getTracks().forEach(track => track.stop());
+     }
+     if (recognitionRef.current) {
+       recognitionRef.current.stop();
+       recognitionRef.current = null;
+     }
+     setIsRecording(false);
+   };
+
+   const removeAudio = () => {
+     if (audioPreview) URL.revokeObjectURL(audioPreview);
+     setAudioBlob(null);
+     setAudioPreview(null);
+   };
+
+   // Helper to convert file to base64
+   const fileToBase64 = (file: File | Blob): Promise<string> => {
+     return new Promise((resolve, reject) => {
+       const reader = new FileReader();
+       reader.readAsDataURL(file);
+       reader.onload = () => resolve(reader.result as string);
+       reader.onerror = error => reject(error);
+     });
+   };
+
    async function handleGenerate() { 
      if (!contentType || !platform || !prompt.trim()) { 
        toast.error('Please complete all required steps.'); 
@@ -413,9 +619,28 @@
        if (contentType === 'video') {
         const durationValue = parseInt(duration?.replace('s', '') || '5');
 
-        // Script-only / Reel-script are TEXT outputs (scripts), not MP4 generation.
-        // Use the content generation endpoint, which supports these via `videoType`.
-        if (videoType === 'script-only' || videoType === 'reel-script') {
+        // Short-video generates an actual MP4 via the video service.
+        const attachedImages = selectedFiles.filter(f => f.type === 'image');
+        let videoTypeToUse: 'text' | 'image' | 'multi-image' | 'audio' = 'text';
+        let imagesBase64: string[] | undefined = undefined;
+        let audioBase64: string | undefined = undefined;
+
+        if (audioBlob) {
+          videoTypeToUse = 'audio';
+          audioBase64 = await fileToBase64(audioBlob);
+        } else if (attachedImages.length === 1) {
+          videoTypeToUse = 'image';
+          imagesBase64 = [await fileToBase64(attachedImages[0].file)];
+        } else if (attachedImages.length > 1) {
+          videoTypeToUse = 'multi-image';
+          imagesBase64 = await Promise.all(attachedImages.map(f => fileToBase64(f.file)));
+        }
+
+        // Script-only / Reel-script are TEXT outputs (scripts), unless we have images/audio
+        // If we have images or audio, we force 'short-video' behavior (actual MP4 generation)
+        const isActuallyVideo = videoType === 'short-video' || videoTypeToUse !== 'text';
+
+        if (!isActuallyVideo) {
           const response = await contentApi.generateContent({
             type: 'video',
             platform,
@@ -434,17 +659,18 @@
           return;
         }
 
-        // Short-video generates an actual MP4 via the video service.
         const response = await videoApi.generateVideo({
           prompt,
-          type: 'text',
+          type: videoTypeToUse,
+          images: imagesBase64,
+          audio: audioBase64,
           duration: durationValue as 5 | 10 | 15,
-          model: 'wan',
+          model: videoModel, // Use the selected video model
           platform,
         });
         const video = response.data;
         if (video.videoUrl) {
-          setOutput(video.videoUrl);
+          setOutput(normalizeMediaUrl(video.videoUrl) || null);
           setLoading(false);
           toast.success('Video generated!');
         } else {
@@ -456,6 +682,12 @@
          const model = contentType === 'text' ? textModel : 
                       contentType === 'image' ? imageModel : null; 
    
+         const attachedImages = selectedFiles.filter(f => f.type === 'image');
+         const imagesBase64 = attachedImages.length > 0 
+           ? await Promise.all(attachedImages.map(f => fileToBase64(f.file)))
+           : undefined;
+         const audioBase64 = audioBlob ? await fileToBase64(audioBlob) : undefined;
+
          const response = await contentApi.generateContent({ 
            type: contentType, 
            platform, 
@@ -466,9 +698,12 @@
            aspectRatio: contentType === 'image' ? aspectRatio : undefined, 
            textOverlay: contentType === 'image' ? textOverlay : undefined, 
            overlayText: contentType === 'image' && textOverlay ? overlayText : undefined, 
+           images: imagesBase64,
+           audio: audioBase64,
          }); 
    
-         setOutput(response.data.output || response.data.generatedText || response.data.generatedImage || 'Content generated successfully!'); 
+         const generatedOutput = response.data.output || response.data.generatedText || response.data.generatedImage || 'Content generated successfully!';
+         setOutput(contentType === 'text' ? generatedOutput : normalizeMediaUrl(generatedOutput) || generatedOutput);
          setLoading(false);
          toast.success('Content generated!'); 
        }
@@ -919,12 +1154,16 @@
                      > 
                        <div className="text-xs font-semibold text-gray-500">LTX</div> 
                      </button> 
-                     <button 
-                       disabled 
-                       className="flex-1 p-2 border-2 rounded-full bg-gray-100 opacity-50 cursor-not-allowed" 
-                     > 
-                       <div className="text-xs font-semibold text-gray-500">VEO3</div> 
-                     </button> 
+                    <button
+                      onClick={() => setVideoModel('veo3')}
+                      className={`flex-1 p-2 border-2 rounded-full transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-purple-500 ${
+                        videoModel === 'veo3'
+                          ? 'border-purple-500 bg-purple-50'
+                          : 'border-gray-200 hover:border-purple-400 hover:bg-purple-50'
+                      }`}
+                    >
+                      <div className="text-xs font-semibold text-gray-900">VEO3</div>
+                    </button>
                    </div> 
                  )} 
                </CardContent> 
@@ -933,22 +1172,180 @@
  
            {/* STEP 5 — Prompt + Suggestions */} 
            {canShowStep5 && ( 
-             <Card> 
-               <CardHeader className="pb-3"> 
-                 <CardTitle className="text-base font-semibold">Step 5: Prompt</CardTitle> 
-               </CardHeader> 
-               <CardContent className="space-y-3"> 
-                 <Textarea 
-                   value={prompt} 
-                   onChange={(e) => setPrompt(e.target.value)} 
-                   placeholder="Enter your prompt here..." 
-                   className="min-h-[80px] text-sm" 
-                   ref={promptRef} 
+             <Card className="border-none shadow-none bg-transparent"> 
+               <CardContent className="p-0 space-y-4"> 
+                 {/* Hidden File Inputs */} 
+                 <input 
+                   type="file" 
+                   ref={imageInputRef} 
+                   onChange={(e) => handleFileSelect(e, 'image')} 
+                   accept="image/*" 
+                   multiple 
+                   className="hidden" 
                  /> 
+                 <input 
+                   type="file" 
+                   ref={videoInputRef} 
+                   onChange={(e) => handleFileSelect(e, 'video')} 
+                   accept="video/*" 
+                   multiple 
+                   className="hidden" 
+                 /> 
+                 <input 
+                   type="file" 
+                   ref={docInputRef} 
+                   onChange={(e) => handleFileSelect(e, 'doc')} 
+                   accept=".pdf,.doc,.docx,.txt" 
+                   multiple 
+                   className="hidden" 
+                 /> 
+ 
+                 <div className="flex flex-col w-full rounded-[32px] border border-gray-200 bg-[#f4f4f4] p-2 focus-within:border-gray-300 focus-within:bg-white focus-within:ring-0 transition-all shadow-sm"> 
+                   {/* Selected Files Previews (Top - ChatGPT Style) */} 
+                   {(selectedFiles.length > 0 || audioPreview) && ( 
+                     <div className="flex flex-wrap gap-3 p-3 mb-1"> 
+                       {selectedFiles.map((file, idx) => ( 
+                         <div key={idx} className="relative group w-16 h-16 rounded-2xl border border-gray-100 overflow-hidden bg-white shadow-sm ring-1 ring-gray-100"> 
+                           {file.type === 'image' ? ( 
+                             <img src={file.preview} alt="preview" className="w-full h-full object-cover" /> 
+                           ) : file.type === 'video' ? ( 
+                             <div className="w-full h-full flex items-center justify-center bg-gray-900"> 
+                               <FileVideo className="h-6 w-6 text-white" /> 
+                             </div> 
+                           ) : ( 
+                             <div className="w-full h-full flex items-center justify-center bg-gray-50"> 
+                               <FileText className="h-6 w-6 text-gray-400" /> 
+                             </div> 
+                           )} 
+                           <button 
+                             onClick={() => removeFile(idx)} 
+                             className="absolute top-1.5 right-1.5 bg-black/60 hover:bg-black text-white rounded-full p-1 shadow-md opacity-0 group-hover:opacity-100 transition-opacity z-10" 
+                           > 
+                             <X className="h-3.5 w-3.5" /> 
+                           </button> 
+                         </div> 
+                       ))} 
+
+                       {/* Audio Preview */}
+                       {audioPreview && (
+                         <div className="relative group w-32 h-16 rounded-2xl border border-purple-100 overflow-hidden bg-purple-50 shadow-sm ring-1 ring-purple-100 flex flex-col items-center justify-center p-2">
+                           <div className="flex items-center gap-2 mb-1">
+                             <Mic className="h-4 w-4 text-purple-500" />
+                             <span className="text-[10px] font-medium text-purple-700">Audio clip</span>
+                           </div>
+                           <audio src={audioPreview} controls className="h-6 w-full scale-75 origin-center" />
+                           <button 
+                             onClick={removeAudio} 
+                             className="absolute top-1 right-1 bg-white/80 hover:bg-white text-purple-600 rounded-full p-0.5 shadow-sm opacity-0 group-hover:opacity-100 transition-opacity z-10" 
+                           > 
+                             <X className="h-3 w-3" /> 
+                           </button> 
+                         </div>
+                       )}
+                     </div> 
+                   )} 
+ 
+                   <div className="flex items-center gap-3 px-2 pb-1"> 
+                     {/* Plus Button on Left */} 
+                     <div className="flex-shrink-0"> 
+                       <DropdownMenu> 
+                         <DropdownMenuTrigger asChild> 
+                           <Button 
+                             variant="ghost" 
+                             size="icon" 
+                             className="h-10 w-10 rounded-full hover:bg-gray-200/50 text-gray-500 transition-colors" 
+                           > 
+                             <Plus className="h-6 w-6" /> 
+                           </Button> 
+                         </DropdownMenuTrigger> 
+                         <DropdownMenuContent align="start" className="w-64 p-2 rounded-[20px] shadow-2xl border-gray-100 bg-white/95 backdrop-blur-lg"> 
+                           <DropdownMenuItem 
+                             onClick={() => {
+                               setContentType('video');
+                               imageInputRef.current?.click();
+                             }} 
+                             className="cursor-pointer rounded-xl focus:bg-gray-100 hover:bg-gray-100 py-3 px-4 mb-1 transition-all group" 
+                           > 
+                             <Paperclip className="h-5 w-5 mr-4 text-gray-500 group-hover:text-purple-600 transition-colors" /> 
+                             <span className="text-[15px] font-medium text-gray-700 group-hover:text-gray-900 transition-colors">Add photos & files</span> 
+                           </DropdownMenuItem> 
+                           <DropdownMenuItem 
+                             onClick={() => setContentType('image')} 
+                             className="cursor-pointer rounded-xl focus:bg-gray-100 hover:bg-gray-100 py-3 px-4 transition-all group" 
+                           > 
+                             <ImageIcon className="h-5 w-5 mr-4 text-gray-500 group-hover:text-purple-600 transition-colors" /> 
+                             <span className="text-[15px] font-medium text-gray-700 group-hover:text-gray-900 transition-colors">Create image</span> 
+                           </DropdownMenuItem> 
+                         </DropdownMenuContent> 
+                       </DropdownMenu> 
+                     </div> 
+ 
+                     {/* Modern Textarea */} 
+                     <textarea 
+                       value={prompt} 
+                       onChange={(e) => setPrompt(e.target.value)} 
+                       placeholder={isRecording ? "Listening... speak now" : "Ask anything"} 
+                       className={`flex-1 bg-transparent border-none focus:ring-0 focus:outline-none text-[16px] min-h-[48px] max-h-[200px] py-3.5 resize-none placeholder:text-gray-400 leading-normal scrollbar-hide ${isRecording ? 'text-purple-600 font-medium' : ''}`} 
+                       ref={promptRef as any} 
+                       rows={1} 
+                       onInput={(e) => { 
+                         const target = e.target as HTMLTextAreaElement; 
+                         target.style.height = 'auto'; 
+                         target.style.height = `${target.scrollHeight}px`; 
+                       }} 
+                     /> 
+ 
+                     {/* Right Side Icons */} 
+                     <div className="flex items-center gap-2 flex-shrink-0 px-1"> 
+                       {isRecording && (
+                         <div className="flex gap-0.5 items-center px-2 h-10">
+                           <div className="w-1 h-4 bg-purple-500 rounded-full animate-bounce [animation-delay:-0.3s]" />
+                           <div className="w-1 h-6 bg-purple-500 rounded-full animate-bounce [animation-delay:-0.15s]" />
+                           <div className="w-1 h-4 bg-purple-500 rounded-full animate-bounce" />
+                         </div>
+                       )}
+                       <Button 
+                         variant="ghost" 
+                         size="icon" 
+                         onClick={() => {
+                           if (!isRecording) {
+                             // Don't force video mode if user is just talking to fill prompt
+                             // setContentType('video'); 
+                             startRecording();
+                           } else {
+                             stopRecording();
+                           }
+                         }}
+                         className={`h-10 w-10 rounded-full transition-colors ${
+                           isRecording 
+                             ? 'bg-red-50 text-red-500 hover:bg-red-100' 
+                             : 'hover:bg-gray-200/50 text-gray-500'
+                         }`}
+                       > 
+                         <Mic className={`h-5 w-5 ${isRecording ? 'animate-pulse' : ''}`} /> 
+                       </Button> 
+                       <Button 
+                         onClick={handleGenerate} 
+                         disabled={loading || (!prompt.trim() && !audioBlob && selectedFiles.filter(f => f.type === 'image').length === 0)} 
+                         className={`h-10 w-10 rounded-full p-0 flex items-center justify-center transition-all shadow-sm ${ 
+                           prompt.trim() || audioBlob || selectedFiles.filter(f => f.type === 'image').length > 0
+                             ? 'bg-black text-white hover:bg-gray-800' 
+                             : 'bg-gray-300 text-gray-500' 
+                         }`} 
+                       > 
+                         {loading ? ( 
+                           <Loader2 className="h-5 w-5 animate-spin" /> 
+                         ) : ( 
+                           <ArrowUp className="h-6 w-6" /> 
+                         )} 
+                       </Button> 
+                     </div> 
+                   </div> 
+                 </div> 
  
                  {/* Optional Overlay Text for images */} 
                  {contentType === 'image' && ( 
-                   <div className="space-y-1.5 pt-1 border-t border-gray-100"> 
+                   <div className="space-y-1.5 px-4 pt-1"> 
                      <label className="text-xs font-medium text-gray-700">Overlay Text (optional)</label> 
                      <Input 
                        value={overlayText} 
@@ -958,27 +1355,35 @@
                          setTextOverlay(value.trim().length > 0 ? true : null); 
                        }} 
                        placeholder="Enter overlay text (will be placed on top of the image)" 
-                       className="h-8 text-sm" 
+                       className="h-10 rounded-xl text-sm border-gray-200 focus:border-purple-400 focus:ring-purple-100 transition-all" 
                      /> 
                    </div> 
                  )} 
  
                  {visibleSuggestions.length > 0 && ( 
-                   <div className="space-y-1.5"> 
-                     <div className="flex items-center justify-between"> 
-                       <label className="text-xs font-medium text-gray-700">Suggestions</label> 
+                   <div className="space-y-3 pt-2"> 
+                     <div className="flex items-center justify-between px-4"> 
+                       <label className="text-xs font-semibold text-gray-400 uppercase tracking-widest"> 
+                         {prompt.trim().length >= 2 ? 'Recommended' : 'Popular'} 
+                       </label> 
                        {suggestionsLoading && ( 
-                         <span className="text-[10px] text-gray-500">Generating…</span> 
+                         <div className="flex items-center gap-2"> 
+                           <Loader2 className="h-3 w-3 animate-spin text-purple-500" /> 
+                           <span className="text-[11px] text-gray-400 italic">AI thinking…</span> 
+                         </div> 
                        )} 
                      </div> 
-                     <div className="flex flex-col gap-1.5"> 
+                     <div className="grid grid-cols-1 gap-2 px-2"> 
                        {visibleSuggestions.map((suggestion, index) => ( 
                          <button 
                            key={index} 
                            onClick={() => handleSuggestionClick(suggestion)} 
-                           className="text-left p-2 border border-gray-200 rounded-lg hover:border-purple-400 hover:bg-purple-50 transition-all duration-200 text-xs text-gray-700" 
+                           className="text-left px-4 py-3 border border-gray-100 rounded-2xl hover:border-purple-200 hover:bg-purple-50/30 transition-all duration-200 text-[14px] text-gray-600 group flex items-center justify-between" 
                          > 
-                           {renderHighlightedSuggestion(suggestion, highlightQuery)} 
+                           <span className="flex-1 truncate"> 
+                             {renderHighlightedSuggestion(suggestion, highlightQuery)} 
+                           </span> 
+                           <Plus className="h-4 w-4 text-gray-300 group-hover:text-purple-400 transition-colors ml-3 flex-shrink-0" /> 
                          </button> 
                        ))} 
                      </div> 
@@ -988,95 +1393,95 @@
              </Card> 
            )} 
  
-           {/* STEP 6 — Generate Button */} 
-           {canShowStep6 && ( 
-             <Card> 
-               <CardContent className="pt-4"> 
-                 <Button 
-                   onClick={handleGenerate} 
-                   disabled={loading} 
-                   className="w-full" 
-                   size="default" 
-                 > 
-                   {loading ? 'Generating...' : 'Generate Content'} 
-                 </Button> 
-               </CardContent> 
-             </Card> 
+           {/* STEP 6 — Generate Content */} 
+           {canShowStep6 && !loading && !output && ( 
+             <div className="flex justify-center pt-2"> 
+               <Button 
+                 onClick={handleGenerate} 
+                 className="bg-purple-600 hover:bg-purple-700 text-white px-12 py-6 rounded-full text-lg font-bold shadow-lg transform transition-transform hover:scale-105 active:scale-95" 
+               > 
+                 Generate Content 
+               </Button> 
+             </div> 
            )} 
          </div> 
  
-         {/* RIGHT SIDE - Fixed Output Panel */} 
-         <div className="w-80 flex-shrink-0"> 
-           <Card className="sticky top-6 h-120 flex flex-col"> 
-             <CardHeader className="pb-3 flex-shrink-0"> 
-               <CardTitle className="text-base font-semibold">Output Panel</CardTitle> 
-             </CardHeader> 
-             <CardContent className="space-y-3 flex-1 flex flex-col min-h-0"> 
-               {loading && ( 
-                 <div className="text-center py-6"> 
-                   <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-purple-600 mx-auto mb-3"></div> 
-                   <p className="text-gray-500 text-xs">Generating content...</p> 
+         {/* RIGHT SIDE - Output Panel */} 
+         <Card className="w-[400px] flex flex-col h-full sticky top-6"> 
+           <CardHeader className="pb-3 border-b border-gray-100"> 
+             <CardTitle className="text-base font-semibold">Output Panel</CardTitle> 
+           </CardHeader> 
+           <CardContent className="flex-1 flex flex-col p-4 overflow-hidden"> 
+             {loading ? (
+               <div className="flex-1 flex flex-col items-center justify-center text-center space-y-4"> 
+                 <div className="relative">
+                   <div className="h-16 w-16 rounded-full border-4 border-purple-100 border-t-purple-600 animate-spin" />
+                   <div className="absolute inset-0 flex items-center justify-center">
+                     <Sparkles className="h-6 w-6 text-purple-600 animate-pulse" />
+                   </div>
+                 </div>
+                 <div className="space-y-1">
+                   <p className="text-base font-semibold text-gray-900">Generating your content...</p>
+                   <p className="text-sm text-gray-500">Our AI is working its magic ✨</p>
+                 </div>
+                 {contentType === 'video' && (
+                   <div className="w-full max-w-[200px] bg-gray-100 rounded-full h-1.5 overflow-hidden">
+                     <div className="bg-purple-600 h-full animate-shimmer" style={{ width: '100%', background: 'linear-gradient(90deg, #9333ea 0%, #d8b4fe 50%, #9333ea 100%)', backgroundSize: '200% 100%' }} />
+                   </div>
+                 )}
+               </div> 
+             ) : !output ? ( 
+               <div className="flex-1 flex flex-col items-center justify-center text-gray-400 space-y-2 text-center"> 
+                 <div className="text-4xl">✨</div> 
+                 <p className="text-sm">Generated content will appear here</p> 
+               </div> 
+             ) : ( 
+               <div className="flex-1 flex flex-col min-h-0 space-y-4"> 
+                 <div className="bg-gray-50 rounded-lg p-3 flex-1 overflow-y-auto min-h-0"> 
+                   {contentType === 'image' && (output.startsWith('data:image') || output.startsWith('http')) ? ( 
+                     <img src={output} alt="Generated" className="w-full rounded" /> 
+                   ) : contentType === 'video' && (videoType === 'short-video') && (output.startsWith('data:video') || output.startsWith('http') || output.includes('/temp/')) ? ( 
+                     <video 
+                       src={output} 
+                       controls 
+                       className="w-full rounded" 
+                     /> 
+                   ) : ( 
+                     <pre className="whitespace-pre-wrap text-xs text-gray-800">{output}</pre> 
+                   )} 
                  </div> 
-               )} 
-               
-               {!loading && !output && ( 
-                 <div className="text-center py-6"> 
-                   <p className="text-gray-400 text-xs">Generated content will appear here</p> 
-                 </div> 
-               )} 
  
-               {!loading && output && ( 
-                 <div className="space-y-3 flex-1 flex flex-col min-h-0"> 
-                   <div className="bg-gray-50 rounded-lg p-3 flex-1 overflow-y-auto min-h-0"> 
-                     {contentType === 'image' && (output.startsWith('data:image') || output.startsWith('http')) ? ( 
-                       <img src={output} alt="Generated" className="w-full rounded" /> 
-                     ) : contentType === 'video' && (output.startsWith('data:video') || output.startsWith('http')) ? ( 
-                       <video 
-                         src={output} 
-                         controls 
-                         className="w-full rounded" 
-                       /> 
-                     ) : ( 
-                       <pre className="whitespace-pre-wrap text-xs text-gray-800">{output}</pre> 
-                     )} 
-                   </div> 
-                   
-                   <div className="flex flex-col gap-1.5 flex-shrink-0"> 
-                     <Button 
-                       variant="outline" 
-                       onClick={handleCopy} 
-                       className="w-full h-8 text-xs" 
-                       size="sm" 
-                     > 
-                       <Copy className="w-3 h-3 mr-1.5" /> 
-                       Copy 
-                     </Button> 
-                     <Button 
-                       variant="outline" 
-                       onClick={handleRegenerate} 
-                       className="w-full h-8 text-xs" 
-                       size="sm" 
-                       disabled={loading} 
-                     > 
-                       <RefreshCw className="w-3 h-3 mr-1.5" /> 
-                       Regenerate 
-                     </Button> 
-                     <Button 
-                       variant="outline" 
-                       onClick={handleSave} 
-                       className="w-full h-8 text-xs" 
-                       size="sm" 
-                     > 
-                       <Save className="w-3 h-3 mr-1.5" /> 
-                       Save to Library 
-                     </Button> 
-                   </div> 
+                 <div className="grid grid-cols-1 gap-2 shrink-0"> 
+                   <Button 
+                     variant="outline" 
+                     onClick={handleCopy} 
+                     className="w-full justify-start text-xs h-9" 
+                   > 
+                     <Copy className="mr-2 h-3.5 w-3.5" /> 
+                     Copy 
+                   </Button> 
+                   <Button 
+                     variant="outline" 
+                     onClick={handleRegenerate} 
+                     disabled={loading} 
+                     className="w-full justify-start text-xs h-9" 
+                   > 
+                     <RefreshCw className={`mr-2 h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} /> 
+                     Regenerate 
+                   </Button> 
+                   <Button 
+                     onClick={handleSave} 
+                     className="w-full justify-start text-xs h-9 bg-purple-600 hover:bg-purple-700" 
+                   > 
+                     <Save className="mr-2 h-3.5 w-3.5" /> 
+                     Save to Library 
+                   </Button> 
                  </div> 
-               )} 
-             </CardContent> 
-           </Card> 
-         </div> 
+               </div> 
+             )} 
+           </CardContent> 
+         </Card> 
        </div> 
      </DashboardLayout> 
    ); 
- }
+ } 

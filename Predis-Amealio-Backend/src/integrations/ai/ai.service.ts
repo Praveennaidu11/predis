@@ -1,6 +1,8 @@
 import { Injectable, HttpException, HttpStatus, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import axios from 'axios';
+import { GoogleAuth } from 'google-auth-library';
+import { v4 as uuidv4 } from 'uuid';
 import * as fs from 'fs';
 import * as path from 'path';
 import { v4 as uuidv4 } from 'uuid';
@@ -8,6 +10,7 @@ import { v4 as uuidv4 } from 'uuid';
 @Injectable()
 export class AIService {
   private readonly logger = new Logger(AIService.name);
+  private readonly vertexAuth: GoogleAuth;
 
   // Legacy fields (kept for video generator / future use)
   private readonly ollamaBaseUrl: string;
@@ -66,6 +69,139 @@ export class AIService {
       this.configService.get<string>('HF_TEXT_MODEL') || 'HuggingFaceH4/zephyr-7b-beta';
     this.hfDefaultImageModel =
       this.configService.get<string>('HF_IMAGE_MODEL') || 'stabilityai/sdxl-turbo';
+
+    this.vertexAuth = new GoogleAuth({
+      scopes: ['https://www.googleapis.com/auth/cloud-platform'],
+    });
+  }
+
+  private mapDurationToVeo(durationSeconds: number): number {
+    // Veo 3/3.1 accept 4, 6, 8 (per docs). Map our UI (5/10/15) to closest supported.
+    if (durationSeconds <= 5) return 6;
+    return 8;
+  }
+
+  private parseDataImage(dataUrl: string): { mimeType: string; bytesBase64Encoded: string } {
+    const match = dataUrl.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.*)$/);
+    if (!match) throw new Error('Invalid image data URL');
+    return { mimeType: match[1], bytesBase64Encoded: match[2] };
+  }
+
+  private async getVertexAccessToken(): Promise<string> {
+    const client = await this.vertexAuth.getClient();
+    const tokenResponse = await client.getAccessToken();
+    const token = typeof tokenResponse === 'string' ? tokenResponse : tokenResponse?.token;
+    if (!token) throw new Error('Unable to obtain Google access token for Vertex AI');
+    return token;
+  }
+
+  private async resolveVertexProjectId(): Promise<string> {
+    const configured = this.configService.get<string>('GCP_PROJECT_ID');
+    if (configured && configured !== 'your_gcp_project_id') return configured;
+    const inferred = await this.vertexAuth.getProjectId();
+    if (inferred) return inferred;
+    throw new Error('GCP_PROJECT_ID is not configured');
+  }
+
+  private async generateVeo3Video(
+    prompt: string,
+    options: { durationSeconds: number; images?: string[]; aspectRatio?: '16:9' | '9:16' },
+  ): Promise<string> {
+    const projectId = await this.resolveVertexProjectId();
+    const region = this.configService.get<string>('GCP_REGION') || 'us-central1';
+    const modelId = this.configService.get<string>('VERTEX_VEO3_MODEL') || 'veo-3.1-generate-001';
+    const storageUriBase = this.configService.get<string>('VEO3_OUTPUT_STORAGE_URI');
+
+    if (!storageUriBase || storageUriBase.startsWith('gs://your-bucket')) {
+      throw new Error('VEO3_OUTPUT_STORAGE_URI is not configured (must be a gs:// bucket/prefix)');
+    }
+
+    const durationSeconds = this.mapDurationToVeo(options.durationSeconds);
+    const storageUri = storageUriBase.endsWith('/')
+      ? `${storageUriBase}${uuidv4()}/`
+      : `${storageUriBase}/${uuidv4()}/`;
+
+    const endpoint = `https://${region}-aiplatform.googleapis.com/v1/projects/${encodeURIComponent(
+      projectId,
+    )}/locations/${encodeURIComponent(
+      region,
+    )}/publishers/google/models/${encodeURIComponent(modelId)}:predictLongRunning`;
+
+    const instance: any = { prompt };
+
+    if (options.images && options.images.length > 0) {
+      instance.referenceImages = options.images.slice(0, 3).map((img) => {
+        if (img.startsWith('data:image/')) {
+          const parsed = this.parseDataImage(img);
+          return {
+            image: parsed,
+            referenceType: 'asset',
+          };
+        }
+        if (img.startsWith('gs://')) {
+          return {
+            image: { gcsUri: img },
+            referenceType: 'asset',
+          };
+        }
+        throw new Error('Veo3 images must be data:image/... base64 or gs:// URIs');
+      });
+    }
+
+    const body: any = {
+      instances: [instance],
+      parameters: {
+        storageUri,
+        sampleCount: 1,
+        durationSeconds,
+        aspectRatio: options.aspectRatio || '9:16',
+        resolution: '720p',
+      },
+    };
+
+    const token = await this.getVertexAccessToken();
+    const start = await axios.post(endpoint, body, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json; charset=utf-8',
+      },
+      timeout: 30000,
+    });
+
+    const operationName: string = start.data?.name;
+    if (!operationName) throw new Error('Vertex Veo did not return operation name');
+
+    const pollEndpoint = `https://${region}-aiplatform.googleapis.com/v1/projects/${encodeURIComponent(
+      projectId,
+    )}/locations/${encodeURIComponent(
+      region,
+    )}/publishers/google/models/${encodeURIComponent(modelId)}:fetchPredictOperation`;
+
+    const deadline = Date.now() + 6 * 60 * 1000;
+    while (Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 5000));
+      const pollToken = await this.getVertexAccessToken();
+      const pollRes = await axios.post(
+        pollEndpoint,
+        { operationName },
+        {
+          headers: {
+            Authorization: `Bearer ${pollToken}`,
+            'Content-Type': 'application/json; charset=utf-8',
+          },
+          timeout: 30000,
+        },
+      );
+
+      if (pollRes.data?.done) {
+        const videos = pollRes.data?.response?.videos;
+        const gcsUri = Array.isArray(videos) ? videos?.[0]?.gcsUri : undefined;
+        if (!gcsUri) throw new Error('Vertex Veo completed but no output gcsUri was returned');
+        return gcsUri;
+      }
+    }
+
+    throw new Error('Vertex Veo timed out while waiting for video generation');
   }
 
   /* ----------------------------------------------------------
@@ -320,6 +456,101 @@ export class AIService {
     }
   }
 
+  /** Hosted generator expects `text-to-video` / `image-to-video`, not DTO enums like `text`. */
+  private mapVideoTypeForExternalApi(
+    internalType: string | undefined,
+    hasImages: boolean,
+  ): string {
+    if (hasImages) {
+      return 'image-to-video';
+    }
+    const t = (internalType || 'text').toLowerCase();
+    if (t === 'image' || t === 'multi-image') {
+      return 'image-to-video';
+    }
+    return 'text-to-video';
+  }
+
+  private extractVideoUrlFromResponse(data: any): string {
+    if (!data) {
+      throw new Error('No video URL returned from video generation API');
+    }
+    if (typeof data === 'string') {
+      return data;
+    }
+    if (Array.isArray(data)) {
+      if (data.length === 0) {
+        throw new Error('Empty videos array from video generation API');
+      }
+      const first = data[0];
+      if (typeof first === 'string') {
+        return first;
+      }
+      if (first && typeof first === 'object') {
+        const u =
+          first.url ||
+          first.video_url ||
+          first.s3_url ||
+          first.href;
+        if (typeof u === 'string') {
+          return u;
+        }
+      }
+    }
+    if (typeof data === 'object') {
+      const u =
+        data.video_url ||
+        data.url ||
+        data.s3_url ||
+        data.href;
+      if (typeof u === 'string') {
+        return u;
+      }
+    }
+    throw new Error(
+      'Video generation API returned a response without a usable video URL',
+    );
+  }
+
+  private formatVideoApiError(error: any): string {
+    const d = error?.response?.data;
+    if (d == null) {
+      return error?.message || String(error);
+    }
+    if (typeof d === 'string') {
+      return d;
+    }
+    if (typeof d === 'object') {
+      const msg =
+        d.detail ||
+        d.message ||
+        d.error ||
+        d.msg;
+      if (typeof msg === 'string') {
+        return msg;
+      }
+      try {
+        return JSON.stringify(d).slice(0, 800);
+      } catch {
+        return error?.message || 'Unknown';
+      }
+    }
+    return error?.message || String(error);
+  }
+
+  private inferHttpStatusForVideoError(detail: string): number {
+    const d = (detail || '').toLowerCase();
+    // Upstream sometimes wraps a 402 into a 500 body; surface as 402 for UI.
+    if (d.includes('payment required') || d.includes('pre-paid credits') || d.includes('prepaid credits')) {
+      return HttpStatus.PAYMENT_REQUIRED;
+    }
+    // Cloudflare timeout from generator
+    if (d.includes('error code 524') || d.includes('a timeout occurred') || d.includes('status code 524')) {
+      return HttpStatus.GATEWAY_TIMEOUT;
+    }
+    return HttpStatus.INTERNAL_SERVER_ERROR;
+  }
+
   private persistBase64ImageToTemp(raw: string): string {
     // Accept either "data:image/png;base64,..." or bare base64.
     const match = raw.match(/^data:([^;]+);base64,(.+)$/);
@@ -346,15 +577,27 @@ export class AIService {
       videoType?: string;
       platform?: string;
       images?: string[];
+      audio?: string;
     }
-  ): Promise<string | string[]> {
+  ): Promise<string> {
     try {
+      if (options.model === 'veo3') {
+        const durationSeconds = options.durationSeconds || 6;
+        const aspectRatio =
+          (options.platform || '').toLowerCase() === 'instagram' ? '9:16' : '16:9';
+        return await this.generateVeo3Video(prompt, {
+          durationSeconds,
+          images: options.images,
+          aspectRatio,
+        });
+      }
+
       // Map frontend model names to API expected values ('local' or 'hf')
       let apiModel = 'local';
-      if (options.model === 'veo3' || options.model === 'hf') {
-        apiModel = 'hf';
-      } else if (options.model === 'wan' || options.model === 'ltx' || options.model === 'local') {
+      if (options.model === 'wan' || options.model === 'ltx' || options.model === 'local') {
         apiModel = 'local';
+      } else if (options.model === 'hf') {
+        apiModel = 'hf';
       }
 
       const duration = options.durationSeconds || 5;
@@ -366,41 +609,86 @@ export class AIService {
        */
       const numClips = 1;
 
-      // Option A: allow routing "long duration" requests to a different endpoint/provider.
-      // Many providers cap the default endpoint to a short preview length.
       const longVideoApiUrl =
         this.configService.get<string>('TEXT_TO_VIDEO_API_URL_LONG') ||
         this.configService.get<string>('VIDEO_API_URL_LONG') ||
         '';
       const videoApiUrlToUse = duration > 5 && longVideoApiUrl ? longVideoApiUrl : this.videoApiUrl;
 
+      const hasImages = !!(options.images && options.images.length > 0);
+      const externalVideoType = this.mapVideoTypeForExternalApi(
+        options.videoType,
+        hasImages,
+      );
+
       const payload: any = {
         prompt,
-        // Option C: send multiple duration keys for compatibility across providers.
-        // Some APIs expect `duration`, others `seconds`/`length`/`duration_seconds`.
         duration: duration,
         duration_seconds: duration,
         seconds: duration,
         length: duration,
         num_clips: numClips,
         model: apiModel,
-        video_type: options.videoType || 'text-to-video',
+        video_type: externalVideoType,
         platform: options.platform || 'instagram',
       };
-
-      this.logger.log(
-        `Sending video generation request to ${videoApiUrlToUse} with payload: ${JSON.stringify(payload)}`,
-      );
 
       if (options.images && options.images.length > 0) {
         payload.images = options.images;
       }
 
-      const response = await axios.post(videoApiUrlToUse, payload, {
-        timeout: 300000, // Video generation can be slow
-      });
+      if (options.audio) {
+        payload.audio = options.audio;
+      }
 
-      // Log a small, safe summary of the response to diagnose duration issues.
+      const logSummary = {
+        ...payload,
+        images: payload.images
+          ? `[${payload.images.length} image(s), base64 omitted]`
+          : undefined,
+        audio: payload.audio ? '[omitted]' : undefined,
+      };
+      this.logger.log(
+        `Sending video generation request to ${videoApiUrlToUse} with payload: ${JSON.stringify(logSummary)}`,
+      );
+
+      let response;
+      try {
+        response = await axios.post(videoApiUrlToUse, payload, {
+          timeout: 300000,
+        });
+      } catch (err: any) {
+        const detail = this.formatVideoApiError(err);
+        const status = this.inferHttpStatusForVideoError(detail);
+
+        // If the hosted generator is out of credits (402) and we requested HF,
+        // automatically retry with the free/local model so the app still works.
+        if (status === HttpStatus.PAYMENT_REQUIRED && payload.model === 'hf') {
+          this.logger.warn(
+            `Hosted video generator returned 402; retrying with local model. Detail: ${detail}`,
+          );
+          const retryPayload = { ...payload, model: 'local' };
+          const retrySummary = { ...logSummary, model: 'local' };
+          this.logger.log(
+            `Retrying video generation request to ${videoApiUrlToUse} with payload: ${JSON.stringify(
+              retrySummary,
+            )}`,
+          );
+          response = await axios.post(videoApiUrlToUse, retryPayload, {
+            timeout: 300000,
+          });
+        } else {
+          throw err;
+        }
+      }
+
+      if (
+        typeof response.data === 'string' &&
+        /^https?:\/\//i.test(response.data.trim())
+      ) {
+        return response.data.trim();
+      }
+
       try {
         const summary = {
           keys: response.data ? Object.keys(response.data) : [],
@@ -416,26 +704,32 @@ export class AIService {
                   : response.data?.s3_url
                     ? 's3_url'
                     : typeof response.data,
-          videosCount: Array.isArray(response.data?.videos) ? response.data.videos.length : undefined,
+          videosCount: Array.isArray(response.data?.videos)
+            ? response.data.videos.length
+            : undefined,
         };
         this.logger.log(`Video API response summary: ${JSON.stringify(summary)}`);
       } catch {
-        // ignore logging failures
+        // ignore
       }
 
-      const videoData = response.data?.video_url || response.data?.videos || response.data?.url || response.data?.s3_url;
+      const raw =
+        response.data?.video_url ||
+        response.data?.videos ||
+        response.data?.url ||
+        response.data?.s3_url ||
+        response.data?.result ||
+        response.data?.output;
 
-      if (!videoData) {
-        throw new Error('No video URL returned from video generation API');
-      }
-
-      return videoData;
+      return this.extractVideoUrlFromResponse(raw);
     } catch (error: any) {
-      this.logger.error('Video generation error', error.response?.data || error.message);
-      throw new HttpException(
-        `Failed to generate video: ${error.message}`,
-        HttpStatus.INTERNAL_SERVER_ERROR
-      );
+      const detail = this.formatVideoApiError(error);
+      this.logger.error(`Video generation error: ${detail}`);
+
+      const lower = String(detail).toLowerCase();
+      const status = this.inferHttpStatusForVideoError(detail);
+
+      throw new HttpException(`Failed to generate video: ${detail}`, status);
     }
   }
 

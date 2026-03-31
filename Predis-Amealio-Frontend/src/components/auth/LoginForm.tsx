@@ -34,6 +34,61 @@ export default function LoginForm({ initialRole = 'merchant' }: LoginFormProps) 
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [isResetLoading, setIsResetLoading] = useState(false);
   const [timer, setTimer] = useState(120);
+  const backendBaseUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8001';
+  const startGoogleAuth = async () => {
+    const url = `${backendBaseUrl}/api/auth/google?role=${encodeURIComponent(role)}`;
+    try {
+      const res = await fetch(url, { method: 'GET', redirect: 'manual' as any });
+      if (res.status === 503) {
+        const data = await res.json().catch(() => null);
+        toast.error('Google login is not configured', {
+          description:
+            data?.message ||
+            'Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in backend .env, then restart backend.',
+        });
+        return;
+      }
+      window.location.href = url;
+    } catch {
+      window.location.href = url;
+    }
+  };
+  const startFacebookAuth = async () => {
+    const url = `${backendBaseUrl}/api/auth/facebook?role=${encodeURIComponent(role)}`;
+    try {
+      const res = await fetch(url, { method: 'GET', redirect: 'manual' as any });
+      if (res.status === 503) {
+        const data = await res.json().catch(() => null);
+        toast.error('Facebook login is not configured', {
+          description:
+            data?.message ||
+            'Set FACEBOOK_APP_ID and FACEBOOK_APP_SECRET in backend .env, then restart backend.',
+        });
+        return;
+      }
+      window.location.href = url;
+    } catch {
+      window.location.href = url;
+    }
+  };
+
+  const GoogleIcon = () => (
+    <svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true">
+      <path fill="#EA4335" d="M24 9.5c3.54 0 6.72 1.22 9.22 3.22l6.9-6.9C35.9 2.2 30.3 0 24 0 14.6 0 6.5 5.38 2.56 13.22l8.08 6.28C12.64 13.22 17.9 9.5 24 9.5z"/>
+      <path fill="#4285F4" d="M47.5 24c0-1.64-.15-3.22-.43-4.75H24v9h13.2c-.57 3.05-2.3 5.64-4.9 7.37l7.5 5.82C44.2 37.4 47.5 31.2 47.5 24z"/>
+      <path fill="#FBBC05" d="M10.64 28.5A14.5 14.5 0 0 1 9.5 24c0-1.57.28-3.1.78-4.5l-8.08-6.28A23.98 23.98 0 0 0 0 24c0 3.9.93 7.6 2.56 10.78l8.08-6.28z"/>
+      <path fill="#34A853" d="M24 48c6.3 0 11.6-2.08 15.47-5.64l-7.5-5.82c-2.08 1.4-4.75 2.24-7.97 2.24-6.1 0-11.36-3.72-13.36-8.9l-8.08 6.28C6.5 42.62 14.6 48 24 48z"/>
+    </svg>
+  );
+
+  const FacebookIcon = () => (
+    <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
+      <path
+        fill="#1877F2"
+        d="M24 12.07C24 5.41 18.63 0 12 0S0 5.41 0 12.07C0 18.09 4.39 23.09 10.13 24v-8.44H7.08v-3.49h3.05V9.41c0-3.03 1.79-4.7 4.54-4.7 1.32 0 2.7.24 2.7.24v2.97h-1.52c-1.5 0-1.96.94-1.96 1.9v2.28h3.33l-.53 3.49h-2.8V24C19.61 23.09 24 18.09 24 12.07z"
+      />
+    </svg>
+  );
 
   useEffect(() => {
     let interval: NodeJS.Timeout;
@@ -108,7 +163,7 @@ export default function LoginForm({ initialRole = 'merchant' }: LoginFormProps) 
   const passwordStrengthPercent = Math.round((passwordScore / 3) * 100);
 
   return (
-    <Card className="w-full max-w-md mx-auto">
+    <Card className="w-full max-w-xl mx-auto">
       <CardHeader className="text-center">
         <div className="w-12 h-12 bg-gradient-primary rounded-lg flex items-center justify-center mx-auto mb-4">
           <span className="text-white font-bold text-lg">A</span>
@@ -120,6 +175,35 @@ export default function LoginForm({ initialRole = 'merchant' }: LoginFormProps) 
         <div className="grid grid-cols-2 gap-2 mb-4">
           <Button variant={role === 'merchant' ? 'gradient' : 'outline'} onClick={() => setRole('merchant')}>Merchant</Button>
           <Button variant={role === 'admin' ? 'gradient' : 'outline'} onClick={() => setRole('admin')}>Admin</Button>
+        </div>
+        <div className="grid gap-2 mb-4">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={startGoogleAuth}
+            className="w-full transition-all hover:bg-gray-50 hover:border-gray-300 hover:shadow-sm"
+          >
+            <span className="flex items-center justify-center gap-2">
+              <GoogleIcon />
+              Continue with Google
+            </span>
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={startFacebookAuth}
+            className="w-full transition-all hover:bg-gray-50 hover:border-gray-300 hover:shadow-sm"
+          >
+            <span className="flex items-center justify-center gap-2">
+              <FacebookIcon />
+              Continue with Facebook
+            </span>
+          </Button>
+          <div className="flex items-center gap-3 py-1">
+            <div className="h-px bg-gray-200 flex-1" />
+            <span className="text-xs text-gray-500">OR</span>
+            <div className="h-px bg-gray-200 flex-1" />
+          </div>
         </div>
         <form onSubmit={handleLogin} className="space-y-4">
           <div className="space-y-2">

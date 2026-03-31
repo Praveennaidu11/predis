@@ -6,14 +6,17 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 import { JwtStrategy } from './jwt.strategy';
+import { FacebookStrategy } from './facebook.strategy';
+import { GoogleStrategy } from './google.strategy';
 import { User } from '../common/entities/user.entity';
-import { MSG91Module } from '../integrations/msg91/msg91.module';
+import { EmailModule } from '../integrations/email/email.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([User]),
     PassportModule,
-    MSG91Module,
+    EmailModule,
+    ConfigModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],
       useFactory: (configService: ConfigService) => ({
@@ -24,7 +27,7 @@ import { MSG91Module } from '../integrations/msg91/msg91.module';
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, JwtStrategy],
+  providers: [AuthService, JwtStrategy, FacebookStrategy, GoogleStrategy],
   exports: [AuthService],
 })
 export class AuthModule {}

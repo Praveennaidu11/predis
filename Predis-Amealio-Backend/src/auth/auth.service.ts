@@ -1,4 +1,5 @@
 import { Injectable, UnauthorizedException, ConflictException, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { JwtService } from '@nestjs/jwt';
@@ -6,8 +7,7 @@ import { User } from '../common/entities/user.entity';
 import * as bcrypt from 'bcryptjs';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
-// All OTP + MSG91 removed
-import { MSG91Service } from '../integrations/msg91/msg91.service';
+import { EmailService } from '../integrations/email/email.service';
 
 @Injectable()
 export class AuthService {
@@ -16,7 +16,8 @@ export class AuthService {
     @InjectRepository(User)
     private userRepository: Repository<User>,
     private jwtService: JwtService,
-    private msg91Service: MSG91Service,
+    private emailService: EmailService,
+    private configService: ConfigService,
   ) {}
 
   /**
@@ -51,13 +52,10 @@ export class AuthService {
 
     await this.userRepository.save(user);
 
-    const res = await this.msg91Service.sendEmailOTP(user.email);
-    if (res.otp) {
-      this.logger.log(`[DEVELOPMENT ONLY] OTP for ${user.email}: ${res.otp}`);
-    }
-
+    const res = await this.emailService.sendEmailOTP(user.email);
+    
     return {
-      message: 'Account created successfully. Please verify your email with the OTP sent.',
+      message: res.message,
       email: user.email,
     };
   }
@@ -109,37 +107,21 @@ export class AuthService {
     const user = await this.userRepository.findOne({ where: { email } });
 
     if (user) {
-      const res = await this.msg91Service.sendEmailOTP(email);
-      if (res.otp) {
-        this.logger.log(`[DEVELOPMENT ONLY] Forgot Password OTP for ${email}: ${res.otp}`);
-      }
+      // Reverting to simple message for now
+      this.logger.log(`Password reset requested for ${email}`);
     }
 
     return {
-      message: 'If an account exists for this email, a reset OTP has been sent.',
+      message: 'If an account exists for this email, reset instructions will be sent.',
     };
   }
 
   async resetPassword(email: string, otp: string, newPassword: string) {
-    const user = await this.userRepository.findOne({ where: { email } });
-
-    if (!user) {
-      throw new UnauthorizedException('User not found. Please sign up first.');
-    }
-
-    const isValid = await this.msg91Service.verifyEmailOTP(email, otp);
-    if (!isValid) {
-      throw new UnauthorizedException('Invalid or expired OTP');
-    }
-
-    const hashedPassword = await bcrypt.hash(newPassword, 10);
-    await this.userRepository.update(user.id, { passwordHash: hashedPassword });
-
-    return { message: 'Password reset successfully' };
+    throw new UnauthorizedException('OTP verification is currently disabled. Please contact support.');
   }
 
   async verifyEmailOtp(email: string, otp: string) {
-    const isValid = await this.msg91Service.verifyEmailOTP(email, otp);
+    const isValid = await this.emailService.verifyEmailOTP(email, otp);
     if (!isValid) {
       throw new UnauthorizedException('Invalid or expired OTP');
     }
@@ -168,14 +150,24 @@ export class AuthService {
       throw new UnauthorizedException('User not found');
     }
 
-    const res = await this.msg91Service.sendEmailOTP(email);
-    if (res.otp) {
-      this.logger.log(`[DEVELOPMENT ONLY] Resent OTP for ${email}: ${res.otp}`);
-    }
+    const res = await this.emailService.sendEmailOTP(email);
+    
     return {
-      message: 'OTP resent to your email',
+      message: res.message,
       email,
     };
+  }
+
+  async sendMobileOtp(mobile: string) {
+    throw new UnauthorizedException('Mobile signup is currently disabled.');
+  }
+
+  async resendMobileOtp(mobile: string) {
+    throw new UnauthorizedException('Mobile OTP resend is currently disabled.');
+  }
+
+  async verifyMobileOtp(mobile: string, otp: string) {
+    throw new UnauthorizedException('Mobile verification is currently disabled.');
   }
 
   /**
@@ -210,6 +202,58 @@ export class AuthService {
     }
 
     return user;
+  }
+
+  /**
+   * SOCIAL LOGIN / SIGNUP
+   * - Check if user exists by email or social ID
+   * - If not, create new user
+   * - Return JWT + User info
+   */
+  async socialLogin(socialUser: any) {
+    let user = await this.userRepository.findOne({
+      where: [
+        { email: socialUser.email },
+        { googleId: socialUser.googleId },
+        { facebookId: socialUser.facebookId },
+      ],
+    });
+
+    if (!user) {
+      user = this.userRepository.create({
+        email: socialUser.email,
+        fullName: socialUser.fullName,
+        googleId: socialUser.googleId,
+        facebookId: socialUser.facebookId,
+        profileImage: socialUser.profileImage,
+        role: socialUser.role || 'merchant',
+        subscriptionTier: 'free',
+      });
+      await this.userRepository.save(user);
+    } else {
+      // Update social ID if not present
+      if (socialUser.googleId && !user.googleId) {
+        user.googleId = socialUser.googleId;
+        await this.userRepository.save(user);
+      }
+      if (socialUser.facebookId && !user.facebookId) {
+        user.facebookId = socialUser.facebookId;
+        await this.userRepository.save(user);
+      }
+    }
+
+    const token = this.generateToken(user.id, user.email, user.role);
+
+    return {
+      token,
+      user: {
+        id: user.id,
+        email: user.email,
+        fullName: user.fullName,
+        role: user.role,
+        companyName: user.companyName,
+      },
+    };
   }
 
   /**

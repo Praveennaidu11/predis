@@ -93,6 +93,13 @@ export class ContentService {
         // configured inside AIService (generateText with model = undefined).
         const modelForText = dto.model === 'llama' ? undefined : dto.model;
 
+        // If audio is provided, we should ideally transcribe it or mention it in the prompt
+        // For now, let's append a note to the AI that this prompt was derived from voice
+        let finalInputPrompt = dto.prompt;
+        if (dto.audio && !dto.prompt) {
+          finalInputPrompt = "Analyze the provided audio context and generate content.";
+        }
+
         const maxTokens = textType === 'long-post' ? 1200 : 400;
         generatedText = await this.aiService.generateText(finalPrompt, modelForText, maxTokens);
 

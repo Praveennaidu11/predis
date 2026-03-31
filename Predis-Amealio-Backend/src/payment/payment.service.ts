@@ -1,16 +1,16 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Payment } from '../common/entities/payment.entity';
 import { Transaction } from '../common/entities/transaction.entity';
 import { User } from '../common/entities/user.entity';
 import { RazorpayService } from '../integrations/razorpay/razorpay.service';
-import { MSG91Service } from '../integrations/msg91/msg91.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { VerifyPaymentDto } from './dto/verify-payment.dto';
 
 @Injectable()
 export class PaymentService {
+  private readonly logger = new Logger(PaymentService.name);
   constructor(
     @InjectRepository(Payment)
     private paymentRepository: Repository<Payment>,
@@ -19,7 +19,6 @@ export class PaymentService {
     @InjectRepository(User)
     private userRepository: Repository<User>,
     private razorpay: RazorpayService,
-    private msg91: MSG91Service,
   ) {}
 
   async createOrder(userId: string, dto: CreateOrderDto) {
@@ -90,13 +89,9 @@ export class PaymentService {
     });
     await this.transactionRepository.save(transaction);
 
-    // Send SMS confirmation
+    // Send confirmation (MSG91 removed)
     if (user) {
-      await this.msg91.sendPaymentConfirmation(
-        user.email, // Mock phone number with email
-        payment.orderId,
-        (payment.amount / 100).toString()
-      );
+      this.logger.log(`Payment confirmed for ${user.email}. Order: ${payment.orderId}`);
     }
 
     return {

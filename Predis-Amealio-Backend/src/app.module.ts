@@ -10,8 +10,7 @@ import { PaymentModule } from './payment/payment.module';
 import { SocialModule } from './social/social.module';
 import { VideoModule } from './video/video.module';
 import { AIModule } from './integrations/ai/ai.module';
-import { GenerationModule } from './generation/generation.module';
-import { MSG91Module } from './integrations/msg91/msg91.module';
+import { EmailModule } from './integrations/email/email.module';
 import { RazorpayModule } from './integrations/razorpay/razorpay.module';
 import { DatabaseService } from './common/database/database.service';
 import { RedisService } from './common/redis.service';
@@ -52,8 +51,7 @@ import * as entities from './common/entities';
     SocialModule,
     VideoModule,
     AIModule,
-    GenerationModule,
-    MSG91Module,
+    EmailModule,
     RazorpayModule,
   ],
   providers: [DatabaseService, RedisService],
