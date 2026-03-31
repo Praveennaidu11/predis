@@ -18,6 +18,10 @@ export class GenerateContentDto {
   @IsString()
   textType?: string;
 
+  @IsOptional()
+  @IsString()
+  tone?: string;
+
   // Optional image-related options
   @IsOptional()
   aspectRatio?: string;

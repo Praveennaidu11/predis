@@ -1,6 +1,9 @@
 import { Injectable, HttpException, HttpStatus, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import axios from 'axios';
+import * as fs from 'fs';
+import * as path from 'path';
+import { v4 as uuidv4 } from 'uuid';
 
 @Injectable()
 export class AIService {
@@ -12,6 +15,16 @@ export class AIService {
   private readonly imageApiBaseUrl: string;
   private readonly videoApiUrl: string;
   private readonly videoApiSendOptions: boolean;
+  private readonly tempDir: string;
+  private readonly backendBaseUrl: string;
+
+  // GPT (OpenAI) configuration
+  private readonly openaiApiKey: string | undefined;
+  private readonly gptModel: string;
+
+  // Gemini (AI Studio) configuration
+  private readonly googleApiKey: string | undefined;
+  private readonly geminiModel: string;
 
   // Hugging Face configuration
   private readonly hfToken: string;
@@ -34,6 +47,20 @@ export class AIService {
           'true', // Default to true so options are sent
       ).toLowerCase() === 'true';
 
+    this.tempDir = path.join(process.cwd(), 'temp');
+    if (!fs.existsSync(this.tempDir)) {
+      fs.mkdirSync(this.tempDir, { recursive: true });
+    }
+    this.backendBaseUrl = this.configService.get('BACKEND_URL') || 'http://localhost:8001';
+
+    this.openaiApiKey = this.configService.get<string>('OPENAI_API_KEY');
+    this.gptModel = this.configService.get<string>('GPT_MODEL') || 'gpt-4o-mini';
+
+    this.googleApiKey =
+      this.configService.get<string>('GEMINI_API_KEY') ||
+      this.configService.get<string>('GOOGLE_API_KEY');
+    this.geminiModel = this.configService.get<string>('GEMINI_MODEL') || 'gemini-flash-latest';
+
     this.hfToken = this.configService.get<string>('HUGGINGFACE_API_TOKEN')!;
     this.hfDefaultTextModel =
       this.configService.get<string>('HF_TEXT_MODEL') || 'HuggingFaceH4/zephyr-7b-beta';
@@ -49,8 +76,50 @@ export class AIService {
     model?: string,
     maxTokens: number = 500
   ): Promise<string> {
-    // Use explicitly provided model or fall back to the default local model
-    const modelId = model || this.ollamaModel || 'phi3:mini';
+    // Provider routing: if caller requests GPT, try OpenAI.
+    if (model === 'gpt') {
+      try {
+        return await this.generateTextWithGPT(prompt, maxTokens);
+      } catch (error: any) {
+        const errorMsg =
+          error?.response?.data?.error?.message ||
+          error?.response?.data?.message ||
+          error?.message ||
+          'Unknown error';
+
+        this.logger.warn(`GPT text generation failed: ${errorMsg}`);
+
+        throw new HttpException(
+          `GPT generation failed: ${errorMsg}`,
+          error?.response?.status || HttpStatus.INTERNAL_SERVER_ERROR,
+        );
+      }
+    }
+
+    // Provider routing: if caller requests Gemini, try Gemini then fall back to Ollama.
+    if (model === 'gemini') {
+      try {
+        return await this.generateTextWithGemini(prompt, maxTokens);
+      } catch (error: any) {
+        const errorMsg =
+          error?.response?.data?.error?.message ||
+          error?.response?.data?.message ||
+          error?.message ||
+          'Unknown error';
+
+        this.logger.warn(`Gemini text generation failed: ${errorMsg}`);
+
+        // If Gemini was explicitly requested, we don't fall back to local Ollama
+        // because Ollama is likely not configured or running on the same machine.
+        throw new HttpException(
+          `Gemini generation failed: ${errorMsg}`,
+          error?.response?.status || HttpStatus.INTERNAL_SERVER_ERROR,
+        );
+      }
+    }
+
+    // Use explicitly provided model (except gemini) or fall back to the default local model
+    const modelId = model && model !== 'gemini' ? model : this.ollamaModel || 'phi3:mini';
 
     try {
       const response = await axios.post(
@@ -101,29 +170,144 @@ export class AIService {
     }
   }
 
+  private async generateTextWithGemini(prompt: string, maxTokens: number): Promise<string> {
+    if (!this.googleApiKey) {
+      throw new Error('GOOGLE_API_KEY is not configured');
+    }
+
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${this.geminiModel}:generateContent?key=${this.googleApiKey}`;
+
+    const body: any = {
+      contents: [
+        {
+          parts: [{ text: prompt }],
+        },
+      ],
+      generationConfig: {
+        temperature: 0.7,
+        maxOutputTokens: Math.min(Math.max(maxTokens, 64), 2048),
+      },
+    };
+
+    try {
+      const res = await axios.post(url, body, { timeout: 60000 });
+      const text =
+        res.data?.candidates?.[0]?.content?.parts?.[0]?.text;
+
+      if (!text || typeof text !== 'string') {
+        throw new Error('Empty response from Gemini');
+      }
+      return text.trim();
+    } catch (error: any) {
+      if (error.response?.status === 404) {
+        // Try v1 if v1beta fails with 404
+        const v1Url = `https://generativelanguage.googleapis.com/v1/models/${this.geminiModel}:generateContent?key=${this.googleApiKey}`;
+        const v1Res = await axios.post(v1Url, body, { timeout: 60000 });
+        const v1Text = v1Res.data?.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (v1Text) return v1Text.trim();
+      }
+      throw error;
+    }
+  }
+
+  private async generateTextWithGPT(prompt: string, maxTokens: number): Promise<string> {
+    if (!this.openaiApiKey) {
+      throw new Error('OPENAI_API_KEY is not configured');
+    }
+
+    const url = 'https://api.openai.com/v1/chat/completions';
+
+    const body = {
+      model: this.gptModel,
+      messages: [
+        {
+          role: 'user',
+          content: prompt,
+        },
+      ],
+      max_tokens: maxTokens,
+      temperature: 0.7,
+    };
+
+    const res = await axios.post(url, body, {
+      headers: {
+        Authorization: `Bearer ${this.openaiApiKey}`,
+        'Content-Type': 'application/json',
+      },
+      timeout: 60000,
+    });
+
+    const text = res.data?.choices?.[0]?.message?.content;
+
+    if (!text || typeof text !== 'string') {
+      throw new Error('Empty response from GPT');
+    }
+    return text.trim();
+  }
+
   /* ----------------------------------------------------------
       IMAGE GENERATION (External text-to-image API)
     ---------------------------------------------------------- */
   async generateImage(prompt: string): Promise<string> {
     try {
-      const response = await axios.post(
-        `${this.imageApiBaseUrl}/generate`,
-        {
-          prompt,
-          model: this.hfDefaultImageModel,
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${this.hfToken}`,
+      // Attempt A: legacy endpoint (/generate)
+      let response: any;
+      try {
+        response = await axios.post(
+          `${this.imageApiBaseUrl}/generate`,
+          {
+            prompt,
+            model: this.hfDefaultImageModel,
           },
-          timeout: 60000,
-        }
-      );
+          {
+            headers: {
+              Authorization: `Bearer ${this.hfToken}`,
+            },
+            timeout: 60000,
+          },
+        );
+      } catch (e: any) {
+        // Many deployments use the "Unified AI Generator" API instead.
+        // If /generate is missing, try /generate-text-image.
+        const status = e?.response?.status;
+        if (status !== 404) throw e;
+        this.logger.warn(
+          `Image API /generate not found (404). Falling back to /generate-text-image on ${this.imageApiBaseUrl}`,
+        );
 
-      const imageUrl = response.data?.url || response.data?.image_url || response.data?.images?.[0];
+        response = await axios.post(
+          `${this.imageApiBaseUrl}/generate-text-image`,
+          { prompt },
+          { timeout: 120000 },
+        );
+      }
+
+      const data = response?.data;
+
+      // URL-based responses
+      let imageUrl =
+        data?.url ||
+        data?.image_url ||
+        data?.imageUrl ||
+        data?.s3_url ||
+        data?.images?.[0] ||
+        data?.result?.url ||
+        data?.result?.image_url;
+
+      // Base64-based responses
+      if (!imageUrl) {
+        const b64 =
+          data?.image_base64 ||
+          data?.image ||
+          (Array.isArray(data?.images) && typeof data.images[0] === 'string' ? data.images[0] : null);
+
+        if (b64 && typeof b64 === 'string') {
+          imageUrl = this.persistBase64ImageToTemp(b64);
+        }
+      }
 
       if (!imageUrl) {
-        throw new Error('No image URL returned from image generation API');
+        throw new Error('No image returned from image generation API');
       }
 
       return imageUrl;
@@ -134,6 +318,21 @@ export class AIService {
         HttpStatus.INTERNAL_SERVER_ERROR
       );
     }
+  }
+
+  private persistBase64ImageToTemp(raw: string): string {
+    // Accept either "data:image/png;base64,..." or bare base64.
+    const match = raw.match(/^data:([^;]+);base64,(.+)$/);
+    const mime = match?.[1] || 'image/png';
+    const base64 = match?.[2] || raw;
+
+    const ext =
+      mime.includes('jpeg') || mime.includes('jpg') ? 'jpg' : mime.includes('webp') ? 'webp' : 'png';
+    const fileName = `img_${Date.now()}_${uuidv4()}.${ext}`;
+    const localPath = path.join(this.tempDir, fileName);
+    fs.writeFileSync(localPath, Buffer.from(base64, 'base64'));
+
+    return `${this.backendBaseUrl}/temp/${fileName}`;
   }
 
   /* ----------------------------------------------------------

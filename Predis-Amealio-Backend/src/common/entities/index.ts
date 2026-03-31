@@ -7,3 +7,4 @@ export * from './admin-settings.entity';
 export * from './transaction.entity';
 export * from './payment.entity';
 export * from './video.entity';
+export * from './generation-job.entity';

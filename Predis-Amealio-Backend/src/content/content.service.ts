@@ -49,40 +49,52 @@ export class ContentService {
         ];
 
         if (textType === 'caption') {
-          rulesLines.push('Write a single Instagram caption, maximum 2 short sentences (no more than about 35 words in total).');
-          rulesLines.push('After the caption, add 2–4 relevant hashtags on one or two lines.');
+          rulesLines.push('Write a single Instagram caption, maximum 2 short sentences.');
+          rulesLines.push('After the caption, add EXACTLY 20 unique hashtags.');
         } else if (textType === 'hashtags') {
-          const platform = dto.platform.toLowerCase();
-          let count = '7–10';
-          if (platform === 'instagram') count = '15–30';
-          if (platform === 'linkedin') count = '3–5';
-          if (platform === 'twitter' || platform === 'x') count = '2–3';
-
-          rulesLines.push(`Provide ONLY ${count} highly relevant hashtags, separated by spaces.`);
-          rulesLines.push('Do NOT include numbers, bullet points, or any sentences.');
+          rulesLines.push(`Provide EXACTLY 30 highly relevant hashtags, separated by spaces.`);
           rulesLines.push('Each hashtag MUST start with the # symbol.');
-          rulesLines.push('Ensure the hashtags are a mix of broad, niche, and brand-relevant tags.');
+          rulesLines.push('Example: #hashtag1 #hashtag2 #hashtag3 ... (continue until you have 30)');
         } else if (textType === 'long-post') {
-          rulesLines.push('Write 2–3 short paragraphs suitable for a social media long post (keep each paragraph concise).');
-          rulesLines.push('After the paragraphs, add 3–5 relevant hashtags at the end.');
+          rulesLines.push('Write a very detailed, long-form social media post.');
+          rulesLines.push('MANDATORY: The content MUST be at least 20 lines long.');
+          rulesLines.push('Structure: Hook (2 lines), Body (15 lines), CTA (3 lines).');
+          rulesLines.push('Use double line breaks (\n\n) between every 2-3 sentences.');
+          rulesLines.push('After the content, add EXACTLY 20 relevant hashtags.');
         }
 
-        rulesLines.push('Do NOT explain anything.');
-        rulesLines.push('Do NOT restate these rules in the output.');
-        rulesLines.push('Output only the final content (caption/hashtags/post) without any extra commentary or headings.');
+        rulesLines.push('Return ONLY the final content. No intro, no outro, no commentary.');
 
         let finalPrompt = `${rulesLines.join('\n')}
-\nUser brief:\n${dto.prompt}\nPlatform: ${dto.platform}\nText type: ${textType}`;
+\nUser brief: ${dto.prompt}\nPlatform: ${dto.platform}\nText type: ${textType}`;
 
         if (brandName) {
           finalPrompt = `Brand Name: ${brandName}\n${finalPrompt}`;
         }
 
+        if (dto.tone) {
+          finalPrompt = `Tone: ${dto.tone} (Be very descriptive and verbose in this tone)\n${finalPrompt}`;
+        }
+
+        // Add final constraints to ensure the model follows the rules
+        const finalConstraints = [
+          '\n\n--- CRITICAL MANDATORY REQUIREMENTS ---',
+          '1. You MUST provide at least 20 hashtags starting with #.',
+          textType === 'long-post' 
+            ? '2. The text content MUST be extremely detailed and exceed 20 full lines. DO NOT BE CONCISE.' 
+            : '',
+          '3. If you provide less than 15 hashtags or 10 lines of text, you have failed the task.',
+          '4. Return ONLY the content.',
+        ].filter(Boolean).join('\n');
+
+        finalPrompt += finalConstraints;
+
         // If frontend sends 'llama', fall back to the default HF text model
         // configured inside AIService (generateText with model = undefined).
         const modelForText = dto.model === 'llama' ? undefined : dto.model;
 
-        generatedText = await this.aiService.generateText(finalPrompt, modelForText, 150);
+        const maxTokens = textType === 'long-post' ? 1200 : 400;
+        generatedText = await this.aiService.generateText(finalPrompt, modelForText, maxTokens);
 
         // Optimization: Clean up hashtag output if it's strictly a hashtag request
         if (textType === 'hashtags' && generatedText) {
@@ -93,8 +105,25 @@ export class ContentService {
 
         let promptToSend = dto.prompt;
 
+        // If user explicitly chose Gemini for an image, use Gemini to enhance the prompt
+        // before calling the actual image generator.
+        if (dto.model === 'gemini') {
+          try {
+            const enhancementPrompt = `Refine this image generation prompt to be more descriptive, creative, and specific for high-quality social media content. Prompt: "${dto.prompt}"\n\nReturn only the refined prompt. No preamble. No explanations. If the prompt is inappropriate, return the word "REFUSED".`;
+            const enhanced = await this.aiService.generateText(enhancementPrompt, 'gemini', 150);
+            
+            if (enhanced && enhanced.trim().toUpperCase() !== 'REFUSED' && enhanced.length > 5) {
+              promptToSend = enhanced;
+            } else {
+              console.warn('Gemini refused enhancement or returned empty, using original prompt');
+            }
+          } catch (e: any) {
+            console.warn('Gemini prompt enhancement failed, falling back to original prompt:', e.message);
+          }
+        }
+
         if (hasOverlay && dto.overlayText) {
-          promptToSend = `${dto.prompt}\n\nOverlay text: "${dto.overlayText}". Design the image so this text appears clearly as readable overlay on the visual.`;
+          promptToSend = `${promptToSend}\n\nOverlay text: "${dto.overlayText}". Design the image so this text appears clearly as readable overlay on the visual.`;
         }
 
         generatedImage = await this.aiService.generateImage(promptToSend);
@@ -148,7 +177,8 @@ export class ContentService {
         }
       }
     } catch (error: any) {
-      if (error instanceof HttpException) {
+      // Re-throw if already an HttpException (like the one thrown from AIService)
+      if (error?.status || error?.response?.status) {
         throw error;
       }
 
@@ -159,17 +189,10 @@ export class ContentService {
         statusCode: error.status || error.response?.status,
       });
 
-      if (dto.type === 'image') {
-        throw new Error(`Image generation failed: ${error.message || 'Unknown error'}`);
-      }
-
-      if (dto.type === 'text') {
-        throw new Error(`Text generation failed: ${error.message || 'Unknown error'}`);
-      }
-
-      if (dto.type === 'video') {
-        throw new Error(`Video generation failed: ${error.message || 'Unknown error'}`);
-      }
+      throw new HttpException(
+        `${dto.type.charAt(0).toUpperCase() + dto.type.slice(1)} generation failed: ${error.message || 'Unknown error'}`,
+        500,
+      );
     }
 
     return {

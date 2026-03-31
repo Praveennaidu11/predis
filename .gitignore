@@ -9,6 +9,13 @@
 **/dist/
 **/build/
 
+# Generated media (dev-only)
+Predis-Amealio-Backend/temp/
+Predis-Amealio-Backend/temp/**
+**/temp/*.mp4
+**/temp/*.webm
+**/temp/*.mov
+
 # env files
 **/.env
 **/.env.local

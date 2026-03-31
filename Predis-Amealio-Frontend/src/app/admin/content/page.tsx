@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import apiClient from '@/lib/api';
 import { toast } from 'sonner';
 import { Search, RefreshCw } from 'lucide-react';
+import GenerationPanel from '@/components/generation/GenerationPanel';
 
 type AdminContentItem = {
   id: string;
@@ -82,6 +83,10 @@ export default function AdminContentPage() {
             <RefreshCw className="h-4 w-4 mr-2" />
             Refresh
           </Button>
+        </div>
+
+        <div className="mb-6">
+          <GenerationPanel title="AI Generation (Admin)" mode="admin" defaultPlatform="instagram" />
         </div>
 
         <Card className="mb-6">
