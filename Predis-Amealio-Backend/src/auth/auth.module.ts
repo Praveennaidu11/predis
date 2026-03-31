@@ -7,6 +7,7 @@ import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 import { JwtStrategy } from './jwt.strategy';
 import { FacebookStrategy } from './facebook.strategy';
+import { GoogleStrategy } from './google.strategy';
 import { User } from '../common/entities/user.entity';
 import { EmailModule } from '../integrations/email/email.module';
 
@@ -26,7 +27,7 @@ import { EmailModule } from '../integrations/email/email.module';
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, JwtStrategy, FacebookStrategy],
+  providers: [AuthService, JwtStrategy, FacebookStrategy, GoogleStrategy],
   exports: [AuthService],
 })
 export class AuthModule {}

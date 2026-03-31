@@ -10,6 +10,7 @@ import * as fs from 'fs';
 import axios from 'axios';
 import { pipeline } from 'stream/promises';
 import { v4 as uuidv4 } from 'uuid';
+import { Storage } from '@google-cloud/storage';
 
 @Injectable()
 export class VideoService {
@@ -29,11 +30,26 @@ export class VideoService {
     this.baseUrl = this.configService.get('BACKEND_URL') || 'http://localhost:8001';
   }
 
+  private async downloadGsUriToLocal(gsUri: string, localPath: string): Promise<void> {
+    const match = gsUri.match(/^gs:\/\/([^/]+)\/(.+)$/);
+    if (!match) {
+      throw new Error(`Invalid GCS URI: ${gsUri}`);
+    }
+    const bucketName = match[1];
+    const filePath = match[2];
+
+    const storage = new Storage();
+    await storage.bucket(bucketName).file(filePath).download({ destination: localPath });
+  }
+
   private resolveAbsoluteVideoUrl(url: unknown): string {
     if (!url || typeof url !== 'string') {
       throw new Error('Invalid video URL from generator');
     }
     const trimmed = url.trim();
+    if (trimmed.startsWith('gs://')) {
+      return trimmed;
+    }
     if (/^https?:\/\//i.test(trimmed)) {
       return trimmed;
     }
@@ -86,14 +102,18 @@ export class VideoService {
       const fileName = `video_${video.id}_${uuidv4()}.mp4`;
       const localPath = path.join(this.tempDir, fileName);
 
-      const response = await axios.get(sourceUrl, {
-        responseType: 'stream',
-        timeout: 600000,
-        maxContentLength: Infinity,
-        maxBodyLength: Infinity,
-      });
-      const writer = fs.createWriteStream(localPath);
-      await pipeline(response.data, writer);
+      if (sourceUrl.startsWith('gs://')) {
+        await this.downloadGsUriToLocal(sourceUrl, localPath);
+      } else {
+        const response = await axios.get(sourceUrl, {
+          responseType: 'stream',
+          timeout: 600000,
+          maxContentLength: Infinity,
+          maxBodyLength: Infinity,
+        });
+        const writer = fs.createWriteStream(localPath);
+        await pipeline(response.data, writer);
+      }
 
       const finalVideoUrl = `${this.baseUrl}/temp/${fileName}`;
 

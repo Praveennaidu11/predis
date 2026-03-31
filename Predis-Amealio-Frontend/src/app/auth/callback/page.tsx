@@ -3,6 +3,7 @@
 import { Suspense, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { toast } from 'sonner';
+import apiClient from '@/lib/api';
 
 function AuthCallbackInner() {
   const router = useRouter();
@@ -20,17 +21,29 @@ function AuthCallbackInner() {
     }
 
     if (token) {
-      localStorage.setItem('token', token);
-      // Trigger storage event for components that listen to it
-      window.dispatchEvent(new Event('storage'));
-      toast.success('Logged in successfully!');
-      
-      // Redirect based on role
-      if (role === 'admin') {
-        router.push('/admin/dashboard');
-      } else {
-        router.push('/merchant/dashboard');
-      }
+      (async () => {
+        try {
+          localStorage.setItem('token', token);
+
+          // Fetch user profile so AuthContext gets both token + user
+          const me = await apiClient.get('/auth/me');
+          if (me.data) {
+            localStorage.setItem('user', JSON.stringify(me.data));
+          }
+
+          window.dispatchEvent(new Event('storage'));
+          toast.success('Logged in successfully!');
+
+          if (role === 'admin') {
+            router.push('/admin/dashboard');
+          } else {
+            router.push('/merchant/dashboard');
+          }
+        } catch (e: any) {
+          toast.error('Login completed but profile fetch failed');
+          router.push('/login');
+        }
+      })();
     } else {
       toast.error('No authentication token received');
       router.push('/login');

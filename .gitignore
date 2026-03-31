@@ -21,6 +21,9 @@
 # OS files
 .DS_Store
 
+# temp files
+Predis-Amealio-Backend/temp/
+
 # IDE files
 .vscode/
 .idea/Predis-Amealio-Backend/temp/*.mp4

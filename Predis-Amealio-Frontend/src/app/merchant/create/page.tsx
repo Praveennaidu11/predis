@@ -1142,12 +1142,16 @@
                      > 
                        <div className="text-xs font-semibold text-gray-500">LTX</div> 
                      </button> 
-                     <button 
-                       disabled 
-                       className="flex-1 p-2 border-2 rounded-full bg-gray-100 opacity-50 cursor-not-allowed" 
-                     > 
-                       <div className="text-xs font-semibold text-gray-500">VEO3</div> 
-                     </button> 
+                    <button
+                      onClick={() => setVideoModel('veo3')}
+                      className={`flex-1 p-2 border-2 rounded-full transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-purple-500 ${
+                        videoModel === 'veo3'
+                          ? 'border-purple-500 bg-purple-50'
+                          : 'border-gray-200 hover:border-purple-400 hover:bg-purple-50'
+                      }`}
+                    >
+                      <div className="text-xs font-semibold text-gray-900">VEO3</div>
+                    </button>
                    </div> 
                  )} 
                </CardContent> 
