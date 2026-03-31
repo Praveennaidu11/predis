@@ -5,7 +5,6 @@ import { GoogleAuth } from 'google-auth-library';
 import { v4 as uuidv4 } from 'uuid';
 import * as fs from 'fs';
 import * as path from 'path';
-import { v4 as uuidv4 } from 'uuid';
 
 @Injectable()
 export class AIService {
@@ -306,7 +305,7 @@ export class AIService {
     }
   }
 
-  private async generateTextWithGemini(prompt: string, maxTokens: number): Promise<string> {
+  private async generateTextWithGemini(prompt: string, maxTokens: number, retryCount = 0): Promise<string> {
     if (!this.googleApiKey) {
       throw new Error('GOOGLE_API_KEY is not configured');
     }
@@ -323,19 +322,39 @@ export class AIService {
         temperature: 0.7,
         maxOutputTokens: Math.min(Math.max(maxTokens, 64), 2048),
       },
+      safetySettings: [
+        { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' },
+        { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' },
+        { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' },
+        { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' },
+      ],
     };
 
     try {
       const res = await axios.post(url, body, { timeout: 60000 });
-      const text =
-        res.data?.candidates?.[0]?.content?.parts?.[0]?.text;
+      
+      // Check if response was blocked by safety filters
+      if (res.data?.candidates?.[0]?.finishReason === 'SAFETY') {
+        throw new Error('Gemini blocked the response due to safety filters. Try a different prompt.');
+      }
+
+      const text = res.data?.candidates?.[0]?.content?.parts?.[0]?.text;
 
       if (!text || typeof text !== 'string') {
         throw new Error('Empty response from Gemini');
       }
       return text.trim();
     } catch (error: any) {
-      if (error.response?.status === 404) {
+      const status = error.response?.status;
+
+      // Retry logic for transient errors (503 Service Unavailable, 429 Rate Limit)
+      if ((status === 503 || status === 429) && retryCount < 2) {
+        this.logger.warn(`Gemini API returned ${status}. Retrying in 2 seconds... (Attempt ${retryCount + 1})`);
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        return this.generateTextWithGemini(prompt, maxTokens, retryCount + 1);
+      }
+
+      if (status === 404) {
         // Try v1 if v1beta fails with 404
         const v1Url = `https://generativelanguage.googleapis.com/v1/models/${this.geminiModel}:generateContent?key=${this.googleApiKey}`;
         const v1Res = await axios.post(v1Url, body, { timeout: 60000 });

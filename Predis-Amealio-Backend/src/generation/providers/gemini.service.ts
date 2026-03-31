@@ -164,7 +164,7 @@ export class GeminiService {
           inlineData: { mimeType: string; data: string };
         }
     >;
-  }): Promise<string> {
+  }, retryCount = 0): Promise<string> {
     if (!this.apiKey) {
       throw new Error('GEMINI_API_KEY is not configured');
     }
@@ -182,12 +182,23 @@ export class GeminiService {
       ],
       generationConfig: {
         temperature: 0.7,
-        maxOutputTokens: 256,
+        maxOutputTokens: 1024, // Increased from 256 for structured packs
       },
+      safetySettings: [
+        { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' },
+        { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' },
+        { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' },
+        { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' },
+      ],
     };
 
     try {
       const res = await axios.post(url, body, { timeout: 60000 });
+      
+      if (res.data?.candidates?.[0]?.finishReason === 'SAFETY') {
+        throw new Error('Blocked by safety filters');
+      }
+
       const text =
         res.data?.candidates?.[0]?.content?.parts?.map((p: any) => p.text).filter(Boolean).join('') ||
         res.data?.text;
@@ -198,11 +209,15 @@ export class GeminiService {
 
       return text;
     } catch (e: any) {
+      const status = e.response?.status;
+      if ((status === 503 || status === 429) && retryCount < 2) {
+        this.logger.warn(`Gemini API ${status}. Retrying... (${retryCount + 1})`);
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+        return this.generateContent(args, retryCount + 1);
+      }
+
       const msg =
-        e?.response?.data?.error?.message ||
-        e?.response?.data?.message ||
-        e?.message ||
-        'Gemini request failed';
+        e?.response?.data?.error?.message || e?.response?.data?.message || e?.message || 'Gemini request failed';
       this.logger.error(`Gemini error: ${msg}`);
       throw new Error(msg);
     }

@@ -50,20 +50,19 @@ export class ContentService {
 
         if (textType === 'caption') {
           rulesLines.push('Write a single Instagram caption, maximum 2 short sentences.');
-          rulesLines.push('After the caption, add EXACTLY 20 unique hashtags.');
+          rulesLines.push('After the caption, add 20 unique hashtags.');
         } else if (textType === 'hashtags') {
-          rulesLines.push(`Provide EXACTLY 30 highly relevant hashtags, separated by spaces.`);
+          rulesLines.push(`Provide 30 highly relevant hashtags, separated by spaces.`);
           rulesLines.push('Each hashtag MUST start with the # symbol.');
-          rulesLines.push('Example: #hashtag1 #hashtag2 #hashtag3 ... (continue until you have 30)');
         } else if (textType === 'long-post') {
           rulesLines.push('Write a very detailed, long-form social media post.');
-          rulesLines.push('MANDATORY: The content MUST be at least 20 lines long.');
-          rulesLines.push('Structure: Hook (2 lines), Body (15 lines), CTA (3 lines).');
-          rulesLines.push('Use double line breaks (\n\n) between every 2-3 sentences.');
-          rulesLines.push('After the content, add EXACTLY 20 relevant hashtags.');
+          rulesLines.push('The content should be at least 20 lines long.');
+          rulesLines.push('Structure: Hook, Body (detailed), and Call-to-action.');
+          rulesLines.push('Use double line breaks (\n\n) between paragraphs.');
+          rulesLines.push('After the content, add 20 relevant hashtags.');
         }
 
-        rulesLines.push('Return ONLY the final content. No intro, no outro, no commentary.');
+        rulesLines.push('Return ONLY the final content. No intro or commentary.');
 
         let finalPrompt = `${rulesLines.join('\n')}
 \nUser brief: ${dto.prompt}\nPlatform: ${dto.platform}\nText type: ${textType}`;
@@ -73,18 +72,17 @@ export class ContentService {
         }
 
         if (dto.tone) {
-          finalPrompt = `Tone: ${dto.tone} (Be very descriptive and verbose in this tone)\n${finalPrompt}`;
+          finalPrompt = `Tone: ${dto.tone}\n${finalPrompt}`;
         }
 
         // Add final constraints to ensure the model follows the rules
         const finalConstraints = [
-          '\n\n--- CRITICAL MANDATORY REQUIREMENTS ---',
-          '1. You MUST provide at least 20 hashtags starting with #.',
+          '\n\n--- REQUIREMENTS ---',
+          '1. Provide at least 20 hashtags starting with #.',
           textType === 'long-post' 
-            ? '2. The text content MUST be extremely detailed and exceed 20 full lines. DO NOT BE CONCISE.' 
+            ? '2. The text content must be very detailed and exceed 20 lines.' 
             : '',
-          '3. If you provide less than 15 hashtags or 10 lines of text, you have failed the task.',
-          '4. Return ONLY the content.',
+          '3. Return ONLY the content.',
         ].filter(Boolean).join('\n');
 
         finalPrompt += finalConstraints;
