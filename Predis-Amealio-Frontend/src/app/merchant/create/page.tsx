@@ -23,11 +23,13 @@
    Sparkles, 
    Brain, 
    Search, 
-   MoreHorizontal 
+   MoreHorizontal,
+   History
  } from 'lucide-react'; 
  import { toast } from 'sonner'; 
  import { contentApi, ContentItem } from '@/lib/api/content'; 
  import { videoApi } from '@/lib/api/video'; 
+ import { generationApi, PromptHistory } from '@/lib/api/generation';
  import { useSearchParams } from 'next/navigation'; 
  import { 
    DropdownMenu, 
@@ -166,6 +168,7 @@
    const lastSuggestionQueryRef = useRef<string>(''); 
    const [aiSuggestions, setAiSuggestions] = useState<string[]>([]); 
    const [suggestionsLoading, setSuggestionsLoading] = useState(false); 
+   const [history, setHistory] = useState<PromptHistory[]>([]);
  
    const [selectedFiles, setSelectedFiles] = useState<{ 
      type: 'image' | 'video' | 'doc'; 
@@ -188,6 +191,29 @@
    const [isEditing, setIsEditing] = useState(false); 
    const [loadedItem, setLoadedItem] = useState<ContentItem | null>(null); 
  
+   useEffect(() => {
+     fetchHistory();
+   }, []);
+
+   const fetchHistory = async () => {
+     try {
+       const { data } = await generationApi.getPromptHistory();
+       setHistory(data);
+     } catch (e) {
+       console.error('Failed to fetch history', e);
+     }
+   };
+
+   const clearHistory = async () => {
+     try {
+       await generationApi.clearPromptHistory();
+       setHistory([]);
+       toast.success('History cleared');
+     } catch (e) {
+       toast.error('Failed to clear history');
+     }
+   };
+
    useEffect(() => { 
      const id = searchParams.get('id'); 
      if (!id) return; 
@@ -706,6 +732,9 @@
          setOutput(contentType === 'text' ? generatedOutput : normalizeMediaUrl(generatedOutput) || generatedOutput);
          setLoading(false);
          toast.success('Content generated!'); 
+
+         // Refresh history after a short delay to allow the backend to save it
+         setTimeout(fetchHistory, 2000);
        }
      } catch (err: any) { 
        toast.error(err.message || 'Something went wrong'); 
@@ -1361,32 +1390,90 @@
                  )} 
  
                  {visibleSuggestions.length > 0 && ( 
-                   <div className="space-y-3 pt-2"> 
-                     <div className="flex items-center justify-between px-4"> 
-                       <label className="text-xs font-semibold text-gray-400 uppercase tracking-widest"> 
-                         {prompt.trim().length >= 2 ? 'Recommended' : 'Popular'} 
-                       </label> 
-                       {suggestionsLoading && ( 
-                         <div className="flex items-center gap-2"> 
-                           <Loader2 className="h-3 w-3 animate-spin text-purple-500" /> 
-                           <span className="text-[11px] text-gray-400 italic">AI thinking…</span> 
+                   <div className="space-y-4 pt-4 border-t border-gray-50 mt-4"> 
+                     {/* Popular Suggestions */}
+                     <div className="space-y-2">
+                       <div className="flex items-center justify-between px-4"> 
+                         <div className="flex items-center gap-1.5 text-[10px] font-bold text-gray-400 uppercase tracking-widest"> 
+                           <Sparkles className="w-3 h-3 text-purple-500" />
+                           Popular Suggestions
                          </div> 
-                       )} 
-                     </div> 
-                     <div className="grid grid-cols-1 gap-2 px-2"> 
-                       {visibleSuggestions.map((suggestion, index) => ( 
-                         <button 
-                           key={index} 
-                           onClick={() => handleSuggestionClick(suggestion)} 
-                           className="text-left px-4 py-3 border border-gray-100 rounded-2xl hover:border-purple-200 hover:bg-purple-50/30 transition-all duration-200 text-[14px] text-gray-600 group flex items-center justify-between" 
-                         > 
-                           <span className="flex-1 truncate"> 
-                             {renderHighlightedSuggestion(suggestion, highlightQuery)} 
-                           </span> 
-                           <Plus className="h-4 w-4 text-gray-300 group-hover:text-purple-400 transition-colors ml-3 flex-shrink-0" /> 
-                         </button> 
-                       ))} 
-                     </div> 
+                         {suggestionsLoading && ( 
+                           <div className="flex items-center gap-2"> 
+                             <Loader2 className="h-3 w-3 animate-spin text-purple-500" /> 
+                             <span className="text-[11px] text-gray-400 italic">AI thinking…</span> 
+                           </div> 
+                         )} 
+                       </div> 
+                       <div className="grid grid-cols-1 gap-2 px-4"> 
+                         {visibleSuggestions.map((suggestion, index) => ( 
+                           <button 
+                             key={index} 
+                             onClick={() => handleSuggestionClick(suggestion)} 
+                             className="text-left px-4 py-3 border border-gray-100 rounded-2xl hover:border-purple-200 hover:bg-purple-50/30 transition-all duration-200 text-[14px] text-gray-600 group flex items-center justify-between shadow-sm" 
+                           > 
+                             <span className="flex-1 truncate">
+                               {suggestion}
+                             </span> 
+                             <Plus className="h-4 w-4 text-gray-300 group-hover:text-purple-400 transition-colors ml-3 flex-shrink-0" /> 
+                           </button> 
+                         ))} 
+                       </div> 
+                     </div>
+
+                     {/* Recent Prompts (History) */}
+                     {history.length > 0 && (
+                       <div className="space-y-2">
+                         <div className="flex items-center justify-between px-4"> 
+                           <div className="flex items-center gap-1.5 text-[10px] font-bold text-gray-400 uppercase tracking-widest"> 
+                             <History className="w-3 h-3 text-blue-500" />
+                             Recent Prompts
+                           </div> 
+                           <button
+                             onClick={clearHistory}
+                             className="text-[10px] text-gray-400 hover:text-red-500 transition-colors flex items-center gap-1"
+                           >
+                             <X className="w-2.5 h-2.5" />
+                             Clear
+                           </button>
+                         </div> 
+                         <div className="grid grid-cols-1 gap-2 px-4"> 
+                           {history.map((h, index) => ( 
+                             <button 
+                               key={h.id || index} 
+                               onClick={() => {
+                                 setPrompt(h.prompt);
+                                 if (h.platform) setPlatform(h.platform as any);
+                                 
+                                 // Try to infer content type from recipe
+                                 if (h.recipe) {
+                                   if (['caption', 'hashtags', 'long-post'].includes(h.recipe)) {
+                                     setContentType('text');
+                                     setTextType(h.recipe as any);
+                                   } else if (h.recipe === 'image' || h.recipe.includes('image')) {
+                                     setContentType('image');
+                                     if (!aspectRatio) setAspectRatio('1:1');
+                                   } else if (h.recipe === 'video' || h.recipe.includes('video')) {
+                                     setContentType('video');
+                                     if (!videoType) setVideoType('short-video');
+                                     if (!duration) setDuration('5s');
+                                   }
+                                 }
+                                 
+                                 // Auto-generate when history is clicked
+                                 setTimeout(() => handleGenerate(), 100);
+                               }} 
+                               className="text-left px-4 py-3 border border-blue-100/50 bg-blue-50/10 rounded-2xl hover:border-blue-200 hover:bg-blue-50/30 transition-all duration-200 text-[14px] text-blue-700/80 group flex items-center justify-between shadow-sm" 
+                             > 
+                               <span className="flex-1 truncate">
+                                 {h.prompt}
+                               </span> 
+                               <RefreshCw className="h-4 w-4 text-blue-300 group-hover:text-blue-500 transition-colors ml-3 flex-shrink-0" /> 
+                             </button> 
+                           ))} 
+                         </div> 
+                       </div>
+                     )}
                    </div> 
                  )} 
                </CardContent> 

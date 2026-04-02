@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -8,10 +8,23 @@ import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from 'sonner';
 import { useGenerationJob } from '@/hooks/useGenerationJob';
-import type { GenerationRecipe } from '@/lib/api/generation';
+import type { GenerationRecipe, PromptHistory } from '@/lib/api/generation';
+import { generationApi } from '@/lib/api/generation';
+import { History, Sparkles, X } from 'lucide-react';
 
 type Platform = 'instagram' | 'facebook' | 'linkedin';
 type Duration = 5 | 10 | 15;
+
+const POPULAR_SUGGESTIONS = [
+  'Create a catchy Instagram caption about sustainable fashion',
+  'Write engaging hashtags for a tech startup launch',
+  'Draft a long-form LinkedIn post about remote work benefits',
+  'Generate a caption for a food photography post',
+  'Create hashtags for a fitness brand campaign',
+  'Write a product launch post for a new organic coffee blend',
+];
+
+const HISTORY_KEY = 'predis_prompt_history';
 
 export type GenerationPanelProps = {
   title?: string;
@@ -46,6 +59,31 @@ export default function GenerationPanel(props: GenerationPanelProps) {
   const [firstFrame, setFirstFrame] = useState<string | null>(null);
   const [lastFrame, setLastFrame] = useState<string | null>(null);
 
+  const [history, setHistory] = useState<PromptHistory[]>([]);
+
+  useEffect(() => {
+    fetchHistory();
+  }, []);
+
+  const fetchHistory = async () => {
+    try {
+      const { data } = await generationApi.getPromptHistory();
+      setHistory(data);
+    } catch (e) {
+      console.error('Failed to fetch history', e);
+    }
+  };
+
+  const clearHistory = async () => {
+    try {
+      await generationApi.clearPromptHistory();
+      setHistory([]);
+      toast.success('History cleared');
+    } catch (e) {
+      toast.error('Failed to clear history');
+    }
+  };
+
   const busy = state.status === 'creating' || state.status === 'polling';
 
   const output = state.job?.output;
@@ -59,10 +97,11 @@ export default function GenerationPanel(props: GenerationPanelProps) {
   const showDuration = recipe.includes('video');
   const needsPrompt = recipe !== 'first_last_to_video';
 
-  const onGenerate = async () => {
+  const onGenerate = async (overridePrompt?: string) => {
     try {
+      const activePrompt = overridePrompt || prompt;
       if (!recipe) return;
-      if (needsPrompt && prompt.trim().length < 2) {
+      if (needsPrompt && activePrompt.trim().length < 2) {
         toast.error('Please enter a prompt.');
         return;
       }
@@ -77,7 +116,7 @@ export default function GenerationPanel(props: GenerationPanelProps) {
 
       await createAndPoll({
         recipe,
-        prompt: prompt.trim() || undefined,
+        prompt: activePrompt.trim() || undefined,
         provider: 'gemini',
         platform,
         duration: showDuration ? duration : undefined,
@@ -89,6 +128,8 @@ export default function GenerationPanel(props: GenerationPanelProps) {
       });
 
       toast.info('Generation started. Polling…');
+      // Refresh history after a short delay to allow the backend to save it
+      setTimeout(fetchHistory, 2000);
     } catch (e: any) {
       toast.error('Generation request failed', {
         description: e?.response?.data?.message || e?.message,
@@ -152,14 +193,72 @@ export default function GenerationPanel(props: GenerationPanelProps) {
         )}
 
         {needsPrompt && (
-          <div className="space-y-1.5">
-            <div className="text-xs font-medium text-muted-foreground">Prompt</div>
-            <Textarea
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              placeholder="Describe what you want to generate…"
-              className="min-h-[90px]"
-            />
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <div className="text-xs font-medium text-muted-foreground">Prompt</div>
+              <Textarea
+                value={prompt}
+                onChange={(e) => setPrompt(e.target.value)}
+                placeholder="Describe what you want to generate…"
+                className="min-h-[90px]"
+              />
+            </div>
+
+            <div className="space-y-4">
+              {/* Popular Suggestions Section */}
+              <div className="space-y-2">
+                <div className="flex items-center gap-1.5 text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
+                  <Sparkles className="w-3 h-3 text-purple-500" />
+                  Popular Suggestions
+                </div>
+                <div className="flex flex-col gap-2">
+                  {POPULAR_SUGGESTIONS.map((suggestion, idx) => (
+                    <button
+                      key={idx}
+                      onClick={() => setPrompt(suggestion)}
+                      className="text-left px-3 py-2 text-xs bg-secondary hover:bg-secondary/80 text-secondary-foreground rounded-lg border border-border transition-colors flex items-center justify-between"
+                    >
+                      <span>{suggestion}</span>
+                      <Sparkles className="w-3 h-3 text-purple-400" />
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* History Section */}
+              {history.length > 0 && (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5 text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
+                      <History className="w-3 h-3 text-blue-500" />
+                      Recent Prompts
+                    </div>
+                    <button
+                      onClick={clearHistory}
+                      className="text-[10px] text-muted-foreground hover:text-red-500 transition-colors flex items-center gap-1"
+                    >
+                      <X className="w-2.5 h-2.5" />
+                      Clear
+                    </button>
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    {history.map((h, idx) => (
+                      <button
+                        key={h.id || idx}
+                        onClick={() => {
+                          setPrompt(h.prompt);
+                          onGenerate(h.prompt);
+                        }}
+                        className="text-left px-3 py-2 text-xs bg-blue-50/50 hover:bg-blue-100/50 text-blue-700 rounded-lg border border-blue-200/50 transition-colors flex items-center justify-between"
+                      >
+                        <span className="truncate flex-1">{h.prompt}</span>
+                        <History className="w-3 h-3 text-blue-400" />
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         )}
 

@@ -28,4 +28,11 @@ export class CreateVideoDto {
   @IsOptional()
   @IsString()
   platform?: string;
+
+  @IsOptional()
+  @IsString()
+  recipe?: string;
+
+  @IsOptional()
+  input?: any;
 }

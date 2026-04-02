@@ -1,5 +1,6 @@
 import { Controller, Post, Get, Delete, Body, Param, Query, UseGuards, Request } from '@nestjs/common';
 import { ContentService } from './content.service';
+import { PromptHistoryService } from './prompt-history.service';
 import { GenerateContentDto } from './dto/generate-content.dto';
 import { SaveContentDto } from './dto/save-content.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -7,7 +8,20 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 @Controller('merchant')
 @UseGuards(JwtAuthGuard)
 export class ContentController {
-  constructor(private contentService: ContentService) {}
+  constructor(
+    private contentService: ContentService,
+    private historyService: PromptHistoryService,
+  ) {}
+
+  @Get('prompt-history')
+  async getHistory(@Request() req) {
+    return this.historyService.findAll(req.user.userId);
+  }
+
+  @Delete('prompt-history')
+  async clearHistory(@Request() req) {
+    return this.historyService.clear(req.user.userId);
+  }
 
   @Post('generate')
   async generate(@Request() req, @Body() dto: GenerateContentDto) {

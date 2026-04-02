@@ -22,6 +22,10 @@ export class GenerateContentDto {
   @IsString()
   tone?: string;
 
+  @IsOptional()
+  @IsString()
+  recipe?: string;
+
   // Optional image-related options
   @IsOptional()
   aspectRatio?: string;

@@ -44,8 +44,18 @@ export type GenerationJob = {
   updatedAt: string;
 };
 
+export type PromptHistory = {
+  id: string;
+  prompt: string;
+  platform: string;
+  recipe: string;
+  createdAt: string;
+};
+
 export const generationApi = {
   createJob: (dto: CreateGenerationJobDto) => apiClient.post<GenerationJob>('/generation/jobs', dto),
   getJob: (id: string) => apiClient.get<GenerationJob>(`/generation/jobs/${id}`),
+  getPromptHistory: () => apiClient.get<PromptHistory[]>('/merchant/prompt-history'),
+  clearPromptHistory: () => apiClient.delete('/merchant/prompt-history'),
 };
 

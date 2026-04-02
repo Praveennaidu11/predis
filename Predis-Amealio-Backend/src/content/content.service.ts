@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Content } from '../common/entities/content.entity';
 import { Brand } from '../common/entities/brand.entity';
+import { PromptHistory } from '../common/entities/prompt-history.entity';
 import { RedisService } from '../common/redis.service';
 import { AIService } from '../integrations/ai/ai.service';
 import { VideoService } from '../video/video.service';
@@ -16,6 +17,8 @@ export class ContentService {
     private contentRepository: Repository<Content>,
     @InjectRepository(Brand)
     private brandRepository: Repository<Brand>,
+    @InjectRepository(PromptHistory)
+    private historyRepository: Repository<PromptHistory>,
     private redis: RedisService,
     private aiService: AIService,
     private videoService: VideoService,
@@ -101,6 +104,22 @@ export class ContentService {
         const maxTokens = textType === 'long-post' ? 1200 : 400;
         generatedText = await this.aiService.generateText(finalPrompt, modelForText, maxTokens);
 
+        // Save to history upon success
+        if (generatedText) {
+          try {
+            await this.historyRepository.save(
+              this.historyRepository.create({
+                userId,
+                prompt: dto.prompt,
+                platform: dto.platform,
+                recipe: dto.recipe || textType || dto.type,
+              }),
+            );
+          } catch (e) {
+            console.warn('Failed to save prompt history:', e.message);
+          }
+        }
+
         // Optimization: Clean up hashtag output if it's strictly a hashtag request
         if (textType === 'hashtags' && generatedText) {
           generatedText = this.cleanHashtags(generatedText);
@@ -132,6 +151,22 @@ export class ContentService {
         }
 
         generatedImage = await this.aiService.generateImage(promptToSend);
+
+        // Save to history upon success
+        if (generatedImage) {
+          try {
+            await this.historyRepository.save(
+              this.historyRepository.create({
+                userId,
+                prompt: dto.prompt,
+                platform: dto.platform,
+                recipe: dto.recipe || dto.type,
+              }),
+            );
+          } catch (e) {
+            console.warn('Failed to save prompt history:', e.message);
+          }
+        }
       } else if (dto.type === 'video') {
         let durationSeconds: number | undefined = undefined;
 
@@ -171,14 +206,33 @@ export class ContentService {
 
           generatedText = await this.aiService.generateText(scriptPrompt, undefined, 220);
         } else {
-          const videoRecord = await this.videoService.generateVideo(userId, {
+          generatedVideo = await this.videoService.generateVideo(userId, {
+            recipe: dto.recipe as any || (dto.videoType === 'first_last' ? 'first_last_to_video' : 'text_to_video'),
             prompt: dto.prompt,
-            type: (dto.videoType === 'multi-image' ? 'multi-image' : 'text') as any,
-            duration: durationSeconds || 5,
-            model: dto.model || 'wan',
-            platform: dto.platform,
-          });
-          generatedVideo = videoRecord.videoUrl;
+            duration: durationSeconds as any,
+            type: (dto.videoType === 'first_last' ? 'image' : 'text') as any,
+            model: dto.model || 'local',
+            input: {
+              firstFrame: (dto as any).images?.[0],
+              lastFrame: (dto as any).images?.[1],
+            },
+          }) as any;
+
+          // Save to history upon success
+          if (generatedVideo) {
+            try {
+              await this.historyRepository.save(
+                this.historyRepository.create({
+                  userId,
+                  prompt: dto.prompt,
+                  platform: dto.platform,
+                  recipe: dto.recipe || dto.videoType || dto.type,
+                }),
+              );
+            } catch (e) {
+              console.warn('Failed to save prompt history:', e.message);
+            }
+          }
         }
       }
     } catch (error: any) {
