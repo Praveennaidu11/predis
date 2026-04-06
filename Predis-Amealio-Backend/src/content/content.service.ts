@@ -9,6 +9,11 @@ import { AIService } from '../integrations/ai/ai.service';
 import { VideoService } from '../video/video.service';
 import { GenerateContentDto } from './dto/generate-content.dto';
 import { SaveContentDto } from './dto/save-content.dto';
+import { PromptSuggestionsDto } from './dto/prompt-suggestions.dto';
+import {
+  getDefaultFallbacksForType,
+  scoreFallbackSuggestions,
+} from './prompt-suggestion.fallback';
 
 @Injectable()
 export class ContentService {
@@ -398,5 +403,44 @@ export class ContentService {
       totalShares,
       recentContent
     };
+  }
+
+  /**
+   * Dynamic prompt suggestions (3–5) from user fragment: Gemini + keyword fallback.
+   */
+  async getPromptSuggestions(_userId: string, dto: PromptSuggestionsDto) {
+    const fragment = dto.prompt.trim();
+    if (fragment.length < 2) {
+      return { suggestions: [] as string[] };
+    }
+
+    const ai = await this.aiService.suggestMerchantPromptStarters({
+      userFragment: fragment,
+      platform: dto.platform,
+      contentType: dto.type,
+      textType: dto.textType,
+      tone: dto.tone,
+      videoType: dto.videoType,
+    });
+
+    const fb = scoreFallbackSuggestions(fragment, dto.type, 5);
+
+    const merged: string[] = [];
+    const seen = new Set<string>();
+    for (const s of [...ai, ...fb]) {
+      const k = s.trim().toLowerCase();
+      if (!k || seen.has(k)) continue;
+      seen.add(k);
+      merged.push(s.trim());
+      if (merged.length >= 5) break;
+    }
+
+    if (merged.length === 0) {
+      return {
+        suggestions: getDefaultFallbacksForType(dto.type, 5),
+      };
+    }
+
+    return { suggestions: merged.slice(0, 5) };
   }
 }

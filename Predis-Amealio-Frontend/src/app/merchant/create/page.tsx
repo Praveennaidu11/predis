@@ -75,7 +75,7 @@
    'A promotional video for a new service launch', 
  ]; 
  
- const MAX_VISIBLE_SUGGESTIONS = 6; 
+ const MAX_VISIBLE_SUGGESTIONS = 5; 
  
  function normalizeForMatch(value: string) { 
    return value.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim(); 
@@ -294,12 +294,12 @@
        return; 
      } 
  
-     if (query.length < 8) { 
-       setAiSuggestions([]); 
-       setSuggestionsLoading(false); 
-       lastSuggestionQueryRef.current = ''; 
-       return; 
-     } 
+    if (query.length < 3) { 
+      setAiSuggestions([]); 
+      setSuggestionsLoading(false); 
+      lastSuggestionQueryRef.current = ''; 
+      return; 
+    } 
  
      const signature = JSON.stringify({ 
        query, 

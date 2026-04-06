@@ -3,6 +3,7 @@ import { ContentService } from './content.service';
 import { PromptHistoryService } from './prompt-history.service';
 import { GenerateContentDto } from './dto/generate-content.dto';
 import { SaveContentDto } from './dto/save-content.dto';
+import { PromptSuggestionsDto } from './dto/prompt-suggestions.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 
 @Controller('merchant')
@@ -31,6 +32,11 @@ export class ContentController {
   @Post('save')
   async save(@Request() req, @Body() dto: SaveContentDto) {
     return this.contentService.saveContent(req.user.userId, dto);
+  }
+
+  @Post('prompt-suggestions')
+  async promptSuggestions(@Request() req, @Body() dto: PromptSuggestionsDto) {
+    return this.contentService.getPromptSuggestions(req.user.userId, dto);
   }
 
   @Get('dashboard')
