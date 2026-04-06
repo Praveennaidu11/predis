@@ -12,6 +12,7 @@ import { VideoModule } from './video/video.module';
 import { AIModule } from './integrations/ai/ai.module';
 import { EmailModule } from './integrations/email/email.module';
 import { RazorpayModule } from './integrations/razorpay/razorpay.module';
+import { BrandModule } from './brand/brand.module';
 import { DatabaseService } from './common/database/database.service';
 import { RedisService } from './common/redis.service';
 import * as entities from './common/entities';
@@ -50,6 +51,7 @@ import * as entities from './common/entities';
     PaymentModule,
     SocialModule,
     VideoModule,
+    BrandModule,
     AIModule,
     EmailModule,
     RazorpayModule,

@@ -1,14 +1,13 @@
 import type { Metadata, Viewport } from "next";
-// import { Poppins } from "next/font/google";
+import { Inter } from "next/font/google";
 import "./globals.css";
 import { AuthProvider } from '@/contexts/AuthContext';
 import { Toaster } from 'sonner';
 
-// const poppins = Poppins({
-//   subsets: ["latin"],
-//   weight: ["400", "500", "600", "700"],
-//   variable: "--font-poppins",
-// });
+const inter = Inter({
+  subsets: ["latin"],
+  variable: "--font-inter",
+});
 
 export const metadata: Metadata = {
   title: "Amealio - AI Social Media Management",
@@ -47,7 +46,7 @@ export default function RootLayout({
         <meta name="format-detection" content="telephone=no" />
         <meta name="mobile-web-app-capable" content="yes" />
       </head>
-      <body className="font-sans antialiased" style={{ fontFamily: 'Inter, sans-serif' }}>
+      <body className={`${inter.variable} font-sans antialiased`} style={{ fontFamily: 'Inter, sans-serif' }}>
         <AuthProvider>
           {children}
           <Toaster position="top-right" richColors />

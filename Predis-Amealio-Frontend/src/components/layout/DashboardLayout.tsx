@@ -36,6 +36,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
     { href: '/merchant/dashboard', icon: Home, label: 'Dashboard' },
     { href: '/merchant/create', icon: Plus, label: 'Create Content' },
     { href: '/merchant/content', icon: Folder, label: 'Content Library' },
+    { href: '/merchant/brands', icon: Settings, label: 'Brands' },
     { href: '/merchant/social', icon: Share2, label: 'Social Media' },
     { href: '/merchant/calendar', icon: Calendar, label: 'Calendar' },
     { href: '/merchant/analytics', icon: BarChart3, label: 'Analytics' },
