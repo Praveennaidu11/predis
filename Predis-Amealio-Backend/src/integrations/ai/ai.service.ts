@@ -55,7 +55,7 @@ export class AIService {
     }
     this.backendBaseUrl = this.configService.get('BACKEND_URL') || 'http://localhost:8001';
 
-    this.openaiApiKey = this.configService.get<string>('OPENAI_API_KEY');
+    this.openaiApiKey = this.configService.get<string>('OPENAI_API_KEY')?.trim();
     this.gptModel = this.configService.get<string>('GPT_MODEL') || 'gpt-4o-mini';
 
     this.googleApiKey =
@@ -221,12 +221,36 @@ export class AIService {
           error?.response?.data?.message ||
           error?.message ||
           'Unknown error';
+        const status = error?.response?.status;
+        const quotaLike =
+          status === 429 ||
+          /quota|billing|insufficient/i.test(String(errorMsg));
+
+        if (quotaLike && this.googleApiKey) {
+          this.logger.warn(
+            `GPT unavailable (${status ?? 'n/a'}): ${errorMsg}. Falling back to Gemini.`,
+          );
+          try {
+            return await this.generateTextWithGemini(prompt, maxTokens);
+          } catch (geminiErr: any) {
+            const geminiMsg =
+              geminiErr?.response?.data?.error?.message ||
+              geminiErr?.response?.data?.message ||
+              geminiErr?.message ||
+              'Unknown error';
+            this.logger.warn(`Gemini fallback after GPT failure also failed: ${geminiMsg}`);
+            throw new HttpException(
+              `GPT generation failed: ${errorMsg}`,
+              status || HttpStatus.INTERNAL_SERVER_ERROR,
+            );
+          }
+        }
 
         this.logger.warn(`GPT text generation failed: ${errorMsg}`);
 
         throw new HttpException(
           `GPT generation failed: ${errorMsg}`,
-          error?.response?.status || HttpStatus.INTERNAL_SERVER_ERROR,
+          status || HttpStatus.INTERNAL_SERVER_ERROR,
         );
       }
     }
