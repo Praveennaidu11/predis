@@ -45,8 +45,13 @@ export class ContentController {
   }
 
   @Get('content/list')
-  async getContent(@Request() req, @Query('filter') filter?: string) {
-    return this.contentService.getContent(req.user.userId, filter);
+  async getContent(
+    @Request() req,
+    @Query('filter') filter?: string,
+    @Query('trash') trash?: string,
+  ) {
+    const isTrash = trash === '1' || String(trash).toLowerCase() === 'true';
+    return this.contentService.getContent(req.user.userId, filter, isTrash);
   }
 
   @Get('content/:id')
@@ -57,6 +62,11 @@ export class ContentController {
   @Delete('content/:id')
   async deleteContent(@Request() req, @Param('id') id: string) {
     return this.contentService.deleteContent(req.user.userId, id);
+  }
+
+  @Post('content/:id/restore')
+  async restoreContent(@Request() req, @Param('id') id: string) {
+    return this.contentService.restoreContent(req.user.userId, id);
   }
 
   @Post('content/:id/schedule')

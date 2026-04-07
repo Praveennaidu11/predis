@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { IsNull, Not, Repository } from 'typeorm';
 import { Brand } from '../common/entities/brand.entity';
 import { CreateBrandDto } from './dto/create-brand.dto';
 import { UpdateBrandDto } from './dto/update-brand.dto';
@@ -34,6 +34,14 @@ export class BrandService {
     });
   }
 
+  async findTrash(userId: string) {
+    return this.brandRepository.find({
+      withDeleted: true,
+      where: { userId, deletedAt: Not(IsNull()) } as any,
+      order: { createdAt: 'DESC' } as any,
+    });
+  }
+
   async findOne(userId: string, id: string) {
     const brand = await this.brandRepository.findOne({
       where: { id, userId } as any,
@@ -56,10 +64,17 @@ export class BrandService {
 
   async remove(userId: string, id: string) {
     // Ensure ownership and existence
-    const brand = await this.findOne(userId, id);
-    this.tryDeleteLocalLogoFile(brand.logo);
-    await this.brandRepository.delete({ id, userId } as any);
+    await this.findOne(userId, id);
+    // Soft delete: keep assets so restore is possible.
+    const res = await this.brandRepository.softDelete({ id, userId } as any);
+    if (!res.affected) throw new NotFoundException('Brand not found');
     return { deleted: 1 };
+  }
+
+  async restore(userId: string, id: string) {
+    const res = await this.brandRepository.restore({ id, userId } as any);
+    if (!res.affected) throw new NotFoundException('Brand not found');
+    return this.findOne(userId, id);
   }
 
   async setLogo(userId: string, id: string, logoUrl: string) {

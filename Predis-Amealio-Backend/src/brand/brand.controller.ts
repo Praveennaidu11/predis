@@ -11,6 +11,7 @@ import {
   UseGuards,
   UseInterceptors,
   Request,
+  Query,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
@@ -57,7 +58,10 @@ export class BrandController {
   }
 
   @Get()
-  async list(@Request() req) {
+  async list(@Request() req, @Query('trash') trash?: string) {
+    if (trash === '1' || String(trash).toLowerCase() === 'true') {
+      return this.brands.findTrash(req.user.userId);
+    }
     return this.brands.findAll(req.user.userId);
   }
 
@@ -74,6 +78,11 @@ export class BrandController {
   @Delete(':id')
   async remove(@Request() req, @Param('id') id: string) {
     return this.brands.remove(req.user.userId, id);
+  }
+
+  @Post(':id/restore')
+  async restore(@Request() req, @Param('id') id: string) {
+    return this.brands.restore(req.user.userId, id);
   }
 
   @Post(':id/logo')

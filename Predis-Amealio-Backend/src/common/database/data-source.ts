@@ -6,9 +6,12 @@ import { Content } from '../entities/content.entity';
 import { SocialAccount } from '../entities/social-account.entity';
 import { Analytics } from '../entities/analytics.entity';
 import { AdminSettings } from '../entities/admin-settings.entity';
+import { AdminSettingsAudit } from '../entities/admin-settings-audit.entity';
 import { Transaction } from '../entities/transaction.entity';
 import { Payment } from '../entities/payment.entity';
 import { PromptHistory } from '../entities/prompt-history.entity';
+import { GenerationJob } from '../entities/generation-job.entity';
+import { Video } from '../entities/video.entity';
 
 config();
 
@@ -24,9 +27,23 @@ export const dataSourceOptions: DataSourceOptions = {
     (process.env.DB_HOST && process.env.DB_HOST.includes('amazonaws.com'))
       ? { rejectUnauthorized: false }
       : undefined,
-  entities: [User, Brand, Content, SocialAccount, Analytics, AdminSettings, Transaction, Payment, PromptHistory],
-  migrations: [],
-  synchronize: true,
+  entities: [
+    User,
+    Brand,
+    Content,
+    SocialAccount,
+    Analytics,
+    AdminSettings,
+    AdminSettingsAudit,
+    Transaction,
+    Payment,
+    PromptHistory,
+    GenerationJob,
+    Video,
+  ],
+  migrations: [__dirname + '/migrations/*{.ts,.js}'],
+  // This DataSource is used by the TypeORM CLI (migrations). Keep it migration-driven.
+  synchronize: false,
   logging: process.env.NODE_ENV === 'development',
 };
 

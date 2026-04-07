@@ -52,10 +52,16 @@ export const contentApi = {
   getDashboardStats: () => 
     apiClient.get<DashboardStats>('/merchant/dashboard'),
 
-  // Get content list with optional filter
-  getContent: (filter?: 'all' | 'draft' | 'published' | 'scheduled') =>
-    apiClient.get<ContentItem[]>('/merchant/content/list', { 
-      params: filter && filter !== 'all' ? { filter } : undefined 
+  // Get content list with optional filter (and Trash view)
+  getContent: (
+    filter?: 'all' | 'draft' | 'published' | 'scheduled',
+    params?: { trash?: boolean },
+  ) =>
+    apiClient.get<ContentItem[]>('/merchant/content/list', {
+      params: {
+        ...(filter && filter !== 'all' ? { filter } : {}),
+        ...(params?.trash ? { trash: '1' } : {}),
+      },
     }),
 
   // Get content by ID
@@ -65,6 +71,10 @@ export const contentApi = {
   // Delete content
   deleteContent: (id: string) =>
     apiClient.delete(`/merchant/content/${id}`),
+
+  // Restore content
+  restoreContent: (id: string) =>
+    apiClient.post(`/merchant/content/${id}/restore`),
 
   // Schedule content
   scheduleContent: (id: string, scheduledAt: string) =>

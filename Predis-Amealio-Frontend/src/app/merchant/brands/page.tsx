@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { toast } from 'sonner';
 import { brandsApi, Brand, CreateBrandDto, UpdateBrandDto } from '@/lib/api/brands';
 
@@ -19,7 +20,9 @@ function normalizeHex(value: string) {
 
 export default function MerchantBrandsPage() {
   const [brands, setBrands] = useState<Brand[]>([]);
+  const [trashBrands, setTrashBrands] = useState<Brand[]>([]);
   const [loading, setLoading] = useState(true);
+  const [view, setView] = useState<'active' | 'trash'>('active');
 
   const [createOpen, setCreateOpen] = useState(false);
   const [createForm, setCreateForm] = useState<CreateBrandDto>({
@@ -41,8 +44,12 @@ export default function MerchantBrandsPage() {
   const fetchBrands = async () => {
     try {
       setLoading(true);
-      const { data } = await brandsApi.list();
-      setBrands(Array.isArray(data) ? data : []);
+      const [{ data: active }, { data: trash }] = await Promise.all([
+        brandsApi.list(),
+        brandsApi.list({ trash: true }),
+      ]);
+      setBrands(Array.isArray(active) ? active : []);
+      setTrashBrands(Array.isArray(trash) ? trash : []);
     } catch (e: any) {
       toast.error(e?.response?.data?.message || 'Failed to load brands');
     } finally {
@@ -128,13 +135,41 @@ export default function MerchantBrandsPage() {
   };
 
   const onDelete = async (b: Brand) => {
-    if (!confirm(`Delete brand "${b.name}"? Existing content will keep working (brand becomes empty).`)) return;
+    if (!confirm(`Delete brand "${b.name}"? It will be moved to Trash and can be restored.`)) return;
     try {
       await brandsApi.remove(b.id);
       setBrands((prev) => prev.filter((x) => x.id !== b.id));
-      toast.success('Brand deleted');
+      toast('Moved to Trash', {
+        description: `"${b.name}"`,
+        action: {
+          label: 'Undo',
+          onClick: async () => {
+            try {
+              const { data } = await brandsApi.restore(b.id);
+              setBrands((prev) => [data, ...prev]);
+              setTrashBrands((prev) => prev.filter((x) => x.id !== b.id));
+              toast.success('Restored');
+            } catch (e: any) {
+              toast.error(e?.response?.data?.message || 'Restore failed');
+            }
+          },
+        },
+      });
+      // Refresh trash list in background
+      brandsApi.list({ trash: true }).then(({ data }) => setTrashBrands(Array.isArray(data) ? data : []));
     } catch (e: any) {
       toast.error(e?.response?.data?.message || 'Failed to delete brand');
+    }
+  };
+
+  const onRestore = async (b: Brand) => {
+    try {
+      const { data } = await brandsApi.restore(b.id);
+      setTrashBrands((prev) => prev.filter((x) => x.id !== b.id));
+      setBrands((prev) => [data, ...prev]);
+      toast.success('Brand restored');
+    } catch (e: any) {
+      toast.error(e?.response?.data?.message || 'Failed to restore brand');
     }
   };
 
@@ -152,7 +187,25 @@ export default function MerchantBrandsPage() {
     <DashboardLayout>
       <div className="space-y-6">
         <div className="flex items-center justify-between">
-          <h1 className="text-2xl font-bold">Brands</h1>
+          <div className="space-y-2">
+            <h1 className="text-2xl font-bold">Brands</h1>
+            <Tabs value={view} onValueChange={(v) => setView(v as any)}>
+              <TabsList className="bg-transparent border-0 p-0 gap-2 justify-start">
+                <TabsTrigger
+                  value="active"
+                  className="border-0 rounded-full bg-muted/40 hover:bg-muted px-3 py-1.5 text-sm data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm"
+                >
+                  Active ({brands.length})
+                </TabsTrigger>
+                <TabsTrigger
+                  value="trash"
+                  className="border-0 rounded-full bg-muted/40 hover:bg-muted px-3 py-1.5 text-sm data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm"
+                >
+                  Trash ({trashBrands.length})
+                </TabsTrigger>
+              </TabsList>
+            </Tabs>
+          </div>
           <Dialog open={createOpen} onOpenChange={setCreateOpen}>
             <DialogTrigger asChild>
               <Button>Create brand</Button>
@@ -213,7 +266,7 @@ export default function MerchantBrandsPage() {
 
         {loading ? (
           <div className="text-sm text-muted-foreground">Loading…</div>
-        ) : sortedBrands.length === 0 ? (
+        ) : view === 'active' && sortedBrands.length === 0 ? (
           <Card>
             <CardHeader>
               <CardTitle>No brands yet</CardTitle>
@@ -222,7 +275,16 @@ export default function MerchantBrandsPage() {
               Create your first brand to reuse identity (logo/colors/typography) across content.
             </CardContent>
           </Card>
-        ) : (
+        ) : view === 'trash' && trashBrands.length === 0 ? (
+          <Card>
+            <CardHeader>
+              <CardTitle>Trash is empty</CardTitle>
+            </CardHeader>
+            <CardContent className="text-sm text-muted-foreground">
+              Deleted brands stay here until you restore them.
+            </CardContent>
+          </Card>
+        ) : view === 'active' ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {sortedBrands.map((b) => (
               <Card key={b.id}>
@@ -279,6 +341,26 @@ export default function MerchantBrandsPage() {
                       <div className="font-medium truncate">{b.fontFamily || '—'}</div>
                     </div>
                   </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {[...trashBrands].sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1)).map((b) => (
+              <Card key={b.id}>
+                <CardHeader className="space-y-1">
+                  <CardTitle className="flex items-center justify-between gap-3">
+                    <span className="truncate">{b.name}</span>
+                    <div className="flex gap-2">
+                      <Button variant="outline" size="sm" onClick={() => onRestore(b)}>
+                        Restore
+                      </Button>
+                    </div>
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="text-sm text-muted-foreground">
+                  This brand is in Trash. Restore to make it active again.
                 </CardContent>
               </Card>
             ))}

@@ -124,9 +124,15 @@ export class SocialService {
       throw new NotFoundException('Social account not found');
     }
 
-    await this.socialAccountRepository.remove(account);
+    await this.socialAccountRepository.softDelete({ id: accountId, userId } as any);
 
     return { success: true, message: 'Account disconnected successfully' };
+  }
+
+  async restoreAccount(userId: string, accountId: string) {
+    const res = await this.socialAccountRepository.restore({ id: accountId, userId } as any);
+    if (!res.affected) throw new NotFoundException('Social account not found');
+    return this.socialAccountRepository.findOne({ where: { id: accountId, userId } });
   }
 
   async publishContent(userId: string, dto: PublishContentDto) {

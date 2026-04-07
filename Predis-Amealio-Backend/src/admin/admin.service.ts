@@ -107,44 +107,48 @@ export class AdminService {
     });
   }
 
-  async getContent(filterStatus?: string, limit = 100) {
-    const where: any = {};
-    if (filterStatus && filterStatus !== 'all') {
-      where.status = filterStatus;
+  async getContent(params?: { status?: string; limit?: number; offset?: number }) {
+    const status = params?.status;
+    const rawLimit = params?.limit ?? 100;
+    const limit = Math.max(1, Math.min(rawLimit, 200));
+    const offset = Math.max(0, params?.offset ?? 0);
+
+    const qb = this.contentRepository
+      .createQueryBuilder('c')
+      .leftJoin('c.brand', 'b')
+      .leftJoin('c.user', 'u')
+      .orderBy('c.createdAt', 'DESC')
+      .take(limit)
+      .skip(offset)
+      .select([
+        'c.id',
+        'c.userId',
+        'c.type',
+        'c.prompt',
+        'c.generatedText',
+        'c.generatedImage',
+        'c.generatedVideo',
+        'c.status',
+        'c.platform',
+        'c.scheduledAt',
+        'c.publishedAt',
+        'c.createdAt',
+        'c.updatedAt',
+        'b.id',
+        'b.name',
+        'b.logo',
+        'u.id',
+        'u.email',
+        'u.fullName',
+        'u.role',
+      ]);
+
+    if (status && status !== 'all') {
+      qb.where('c.status = :status', { status });
     }
 
-    return this.contentRepository.find({
-      where,
-      take: limit,
-      order: { createdAt: 'DESC' },
-      relations: ['brand', 'user'],
-      select: {
-        id: true,
-        userId: true,
-        type: true,
-        prompt: true,
-        generatedText: true,
-        generatedImage: true,
-        generatedVideo: true,
-        status: true,
-        platform: true,
-        scheduledAt: true,
-        publishedAt: true,
-        createdAt: true,
-        updatedAt: true,
-        brand: {
-          id: true,
-          name: true,
-          logo: true,
-        } as any,
-        user: {
-          id: true,
-          email: true,
-          fullName: true,
-          role: true,
-        } as any,
-      } as any,
-    });
+    const rows = await qb.getMany();
+    return rows;
   }
 
   async updateUserTier(userId: string, tier: string) {

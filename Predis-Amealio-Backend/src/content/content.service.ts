@@ -1,6 +1,6 @@
 import { Injectable, HttpException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { IsNull, Not, Repository } from 'typeorm';
 import { Content } from '../common/entities/content.entity';
 import { Brand } from '../common/entities/brand.entity';
 import { PromptHistory } from '../common/entities/prompt-history.entity';
@@ -318,7 +318,7 @@ export class ContentService {
     return this.contentRepository.save(content);
   }
 
-  async getContent(userId: string, filter?: string) {
+  async getContent(userId: string, filter?: string, trash?: boolean) {
     const where: any = { userId };
     
     if (filter && filter !== 'all') {
@@ -326,7 +326,8 @@ export class ContentService {
     }
 
     const content = await this.contentRepository.find({
-      where,
+      where: trash ? { ...where, deletedAt: Not(IsNull()) } : where,
+      withDeleted: Boolean(trash),
       order: { createdAt: 'DESC' },
       take: 50,
       relations: ['brand', 'analytics'],
@@ -343,18 +344,37 @@ export class ContentService {
   }
 
   async deleteContent(userId: string, contentId: string) {
-    return this.contentRepository.delete({ id: contentId });
+    const res = await this.contentRepository.softDelete({
+      id: contentId,
+      userId,
+    } as any);
+    return { deleted: res.affected ? 1 : 0 };
   }
 
   async scheduleContent(userId: string, contentId: string, scheduledAt: Date) {
-    await this.contentRepository.update(
-      { id: contentId },
-      {
+    const res = await this.contentRepository
+      .createQueryBuilder()
+      .update()
+      .set({
         status: 'scheduled',
         scheduledAt,
-      }
-    );
-    
+      })
+      .where('id = :id AND user_id = :userId AND deleted_at IS NULL', {
+        id: contentId,
+        userId,
+      })
+      .execute();
+
+    if (!res.affected) return null;
+    return this.getContentById(userId, contentId);
+  }
+
+  async restoreContent(userId: string, contentId: string) {
+    const res = await this.contentRepository.restore({
+      id: contentId,
+      userId,
+    } as any);
+    if (!res.affected) return null;
     return this.getContentById(userId, contentId);
   }
 

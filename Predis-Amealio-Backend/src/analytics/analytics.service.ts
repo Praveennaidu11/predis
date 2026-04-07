@@ -24,22 +24,31 @@ export class AnalyticsService {
       return JSON.parse(cached);
     }
 
-    // Get analytics data
-    const analytics = await this.analyticsRepository
-      .createQueryBuilder('analytics')
-      .leftJoin('analytics.content', 'content')
-      .where('content.userId = :userId', { userId })
-      .getMany();
+    // Aggregate in SQL to avoid loading rows into Node.
+    const totals = await this.analyticsRepository
+      .createQueryBuilder('a')
+      .innerJoin('a.content', 'c')
+      .where('c.userId = :userId', { userId })
+      .select('COALESCE(SUM(a.views), 0)', 'totalViews')
+      .addSelect('COALESCE(SUM(a.likes), 0)', 'totalLikes')
+      .addSelect('COALESCE(SUM(a.shares), 0)', 'totalShares')
+      .addSelect('COALESCE(SUM(a.comments), 0)', 'totalComments')
+      .getRawOne<{
+        totalViews: string;
+        totalLikes: string;
+        totalShares: string;
+        totalComments: string;
+      }>();
 
     const overview = {
-      totalViews: analytics.reduce((sum, a) => sum + a.views, 0),
-      totalLikes: analytics.reduce((sum, a) => sum + a.likes, 0),
-      totalShares: analytics.reduce((sum, a) => sum + a.shares, 0),
-      totalComments: analytics.reduce((sum, a) => sum + a.comments, 0),
-      engagementRate: 8.5, // Calculate based on data
-      viewsGrowth: 15.3,
-      likesGrowth: 12.7,
-      sharesGrowth: 8.4,
+      totalViews: parseInt(totals?.totalViews || '0', 10),
+      totalLikes: parseInt(totals?.totalLikes || '0', 10),
+      totalShares: parseInt(totals?.totalShares || '0', 10),
+      totalComments: parseInt(totals?.totalComments || '0', 10),
+      engagementRate: 8.5, // placeholder (product logic TBD)
+      viewsGrowth: 15.3, // placeholder
+      likesGrowth: 12.7, // placeholder
+      sharesGrowth: 8.4, // placeholder
     };
 
     // Cache for 5 minutes
@@ -49,33 +58,31 @@ export class AnalyticsService {
   }
 
   async getPlatformBreakdown(userId: string) {
-    const content = await this.contentRepository.find({
-      where: { userId },
-      relations: ['analytics'],
-    });
+    // Aggregate in SQL (group by platform) to avoid N+1/large relation loads.
+    const rows = await this.analyticsRepository
+      .createQueryBuilder('a')
+      .innerJoin('a.content', 'c')
+      .where('c.userId = :userId', { userId })
+      .andWhere('c.platform IS NOT NULL')
+      .select('c.platform', 'platform')
+      .addSelect('COALESCE(SUM(a.views), 0)', 'views')
+      .addSelect('COALESCE(SUM(a.likes), 0)', 'likes')
+      .addSelect('COALESCE(SUM(a.shares), 0)', 'shares')
+      .groupBy('c.platform')
+      .orderBy('views', 'DESC')
+      .getRawMany<{
+        platform: string;
+        views: string;
+        likes: string;
+        shares: string;
+      }>();
 
-    const platformStats: any = {};
-
-    content.forEach(c => {
-      if (!c.platform) return;
-      
-      if (!platformStats[c.platform]) {
-        platformStats[c.platform] = {
-          platform: c.platform,
-          views: 0,
-          likes: 0,
-          shares: 0,
-          engagement: 0,
-        };
-      }
-
-      c.analytics.forEach(a => {
-        platformStats[c.platform].views += a.views;
-        platformStats[c.platform].likes += a.likes;
-        platformStats[c.platform].shares += a.shares;
-      });
-    });
-
-    return Object.values(platformStats);
+    return rows.map((r) => ({
+      platform: r.platform,
+      views: parseInt(r.views || '0', 10),
+      likes: parseInt(r.likes || '0', 10),
+      shares: parseInt(r.shares || '0', 10),
+      engagement: 0, // placeholder (product logic TBD)
+    }));
   }
 }

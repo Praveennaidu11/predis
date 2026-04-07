@@ -22,11 +22,15 @@ export type CreateBrandDto = {
 export type UpdateBrandDto = Partial<CreateBrandDto>;
 
 export const brandsApi = {
-  list: () => apiClient.get<Brand[]>('/merchant/brands'),
+  list: (params?: { trash?: boolean }) =>
+    apiClient.get<Brand[]>('/merchant/brands', {
+      params: params?.trash ? { trash: '1' } : undefined,
+    }),
   create: (dto: CreateBrandDto) => apiClient.post<Brand>('/merchant/brands', dto),
   update: (id: string, dto: UpdateBrandDto) =>
     apiClient.patch<Brand>(`/merchant/brands/${id}`, dto),
   remove: (id: string) => apiClient.delete(`/merchant/brands/${id}`),
+  restore: (id: string) => apiClient.post<Brand>(`/merchant/brands/${id}/restore`),
   uploadLogo: (id: string, file: File) => {
     const form = new FormData();
     form.append('file', file);

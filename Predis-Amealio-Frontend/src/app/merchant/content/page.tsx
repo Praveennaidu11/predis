@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Eye, Calendar, Trash2, Edit3, Clock } from 'lucide-react';
+import { Eye, Calendar, Trash2, Edit3, Clock, RotateCcw } from 'lucide-react';
 import { contentApi, ContentItem } from '@/lib/api/content';
 import { useRouter } from 'next/navigation';
 import {
@@ -24,6 +24,7 @@ import { Calendar as DateCalendar } from '@/components/ui/calendar';
 import { Input } from '@/components/ui/input';
 import { TimePickerCompact } from '@/components/ui/time-picker-compact';
 import { toast } from 'sonner';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 const formatTime = (timeString: string): string => {
   const [hours, minutes] = timeString.split(':').map(Number);
@@ -36,7 +37,9 @@ const formatTime = (timeString: string): string => {
 
 export default function ContentLibraryPage() {
   const [contentItems, setContentItems] = useState<ContentItem[]>([]);
+  const [trashItems, setTrashItems] = useState<ContentItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [view, setView] = useState<'active' | 'trash'>('active');
 
   const [selectedItem, setSelectedItem] = useState<ContentItem | null>(null);
   const [viewOpen, setViewOpen] = useState(false);
@@ -87,8 +90,12 @@ export default function ContentLibraryPage() {
   const fetchContent = async () => {
     try {
       setLoading(true);
-      const response = await contentApi.getContent('all');
-      setContentItems(response.data);
+      const [active, trash] = await Promise.all([
+        contentApi.getContent('all'),
+        contentApi.getContent('all', { trash: true }),
+      ]);
+      setContentItems(active.data);
+      setTrashItems(trash.data);
     } catch (error: any) {
       console.error('Failed to fetch content:', error);
       console.error('Error details:', error?.response?.data);
@@ -129,11 +136,48 @@ export default function ContentLibraryPage() {
       await contentApi.deleteContent(selectedItem.id);
       setContentItems((prev) => prev.filter((i) => i.id !== selectedItem.id));
       setDeleteOpen(false);
+      const deleted = selectedItem;
       setSelectedItem(null);
+      toast('Moved to Trash', {
+        description: deleted.prompt ? deleted.prompt.slice(0, 80) : deleted.id,
+        action: {
+          label: 'Undo',
+          onClick: async () => {
+            try {
+              await contentApi.restoreContent(deleted.id);
+              const [active, trash] = await Promise.all([
+                contentApi.getContent('all'),
+                contentApi.getContent('all', { trash: true }),
+              ]);
+              setContentItems(active.data);
+              setTrashItems(trash.data);
+              toast.success('Restored');
+            } catch (e: any) {
+              toast.error(e?.response?.data?.message || 'Restore failed');
+            }
+          },
+        },
+      });
+      contentApi.getContent('all', { trash: true }).then((r) => setTrashItems(r.data));
     } catch (error) {
       console.error('Failed to delete content:', error);
     } finally {
       setActionLoading(false);
+    }
+  };
+
+  const handleRestore = async (item: ContentItem) => {
+    try {
+      await contentApi.restoreContent(item.id);
+      const [active, trash] = await Promise.all([
+        contentApi.getContent('all'),
+        contentApi.getContent('all', { trash: true }),
+      ]);
+      setContentItems(active.data);
+      setTrashItems(trash.data);
+      toast.success('Content restored');
+    } catch (e: any) {
+      toast.error(e?.response?.data?.message || 'Restore failed');
     }
   };
 
@@ -217,14 +261,32 @@ export default function ContentLibraryPage() {
   return (
     <DashboardLayout>
       <div>
-        <div className="flex justify-between items-center mb-6">
-          <h1 className="text-2xl font-bold">Content Library</h1>
+        <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-4 mb-6">
+          <div className="space-y-2">
+            <h1 className="text-2xl font-bold">Content Library</h1>
+            <Tabs value={view} onValueChange={(v) => setView(v as any)}>
+              <TabsList className="bg-transparent border-0 p-0 gap-2 justify-start">
+                <TabsTrigger
+                  value="active"
+                  className="border-0 rounded-full bg-muted/40 hover:bg-muted px-3 py-1.5 text-sm data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm"
+                >
+                  Active ({contentItems.length})
+                </TabsTrigger>
+                <TabsTrigger
+                  value="trash"
+                  className="border-0 rounded-full bg-muted/40 hover:bg-muted px-3 py-1.5 text-sm data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm"
+                >
+                  Trash ({trashItems.length})
+                </TabsTrigger>
+              </TabsList>
+            </Tabs>
+          </div>
           <Button className="bg-purple-600 hover:bg-purple-700" onClick={handleCreateNew}>
             Create New
           </Button>
         </div>
 
-        {contentItems.length === 0 ? (
+        {view === 'active' && contentItems.length === 0 ? (
           <div className="text-center py-12">
             <div className="w-16 h-16 bg-gray-100 rounded-full mx-auto mb-4 flex items-center justify-center">
               <Eye className="w-8 h-8 text-gray-400" />
@@ -235,7 +297,15 @@ export default function ContentLibraryPage() {
               Create Your First Content
             </Button>
           </div>
-        ) : (
+        ) : view === 'trash' && trashItems.length === 0 ? (
+          <div className="text-center py-12">
+            <div className="w-16 h-16 bg-gray-100 rounded-full mx-auto mb-4 flex items-center justify-center">
+              <Trash2 className="w-8 h-8 text-gray-400" />
+            </div>
+            <h3 className="text-lg font-medium text-gray-900 mb-2">Trash is empty</h3>
+            <p className="text-gray-500 mb-4">Deleted content will appear here until restored.</p>
+          </div>
+        ) : view === 'active' ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {contentItems.map((item) => (
               <Card key={item.id} className="overflow-hidden hover:shadow-lg transition-shadow">
@@ -342,6 +412,23 @@ export default function ContentLibraryPage() {
                       </Button>
                     </div>
                   </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {trashItems.map((item) => (
+              <Card key={item.id} className="overflow-hidden">
+                <CardContent className="p-4 space-y-3">
+                  <div className="text-sm font-medium line-clamp-2">{getPreviewText(item)}</div>
+                  <div className="text-xs text-gray-500">
+                    This content is in Trash. Restore to make it active again.
+                  </div>
+                  <Button variant="outline" onClick={() => handleRestore(item)} className="w-full">
+                    <RotateCcw className="h-4 w-4 mr-2" />
+                    Restore
+                  </Button>
                 </CardContent>
               </Card>
             ))}

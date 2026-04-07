@@ -29,6 +29,12 @@ export class SocialController {
     return this.socialService.disconnectAccount(req.user.userId, accountId);
   }
 
+  @Post('accounts/:id/restore')
+  @UseGuards(JwtAuthGuard)
+  async restoreAccount(@Request() req, @Param('id') accountId: string) {
+    return this.socialService.restoreAccount(req.user.userId, accountId);
+  }
+
   @Post('publish')
   @UseGuards(JwtAuthGuard)
   async publishContent(@Request() req, @Body() dto: PublishContentDto) {

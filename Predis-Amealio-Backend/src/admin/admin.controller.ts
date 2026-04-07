@@ -41,9 +41,15 @@ export class AdminController {
   async getContent(
     @Query('status') status?: string,
     @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
   ) {
     const parsedLimit = limit ? parseInt(limit, 10) : undefined;
-    return this.adminService.getContent(status, parsedLimit || 100);
+    const parsedOffset = offset ? parseInt(offset, 10) : undefined;
+    return this.adminService.getContent({
+      status,
+      limit: parsedLimit || 100,
+      offset: parsedOffset || 0,
+    });
   }
 
   @Put('users/:id/tier')

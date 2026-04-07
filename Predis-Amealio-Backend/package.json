@@ -11,8 +11,8 @@
     "start:prod": "node dist/main",
     "typeorm": "typeorm-ts-node-commonjs",
     "migration:generate": "typeorm-ts-node-commonjs migration:generate -d src/common/database/data-source.ts",
-    "migration:run": "typeorm-ts-node-commonjs migration:run -d src/common/database/data-source.ts",
-    "migration:revert": "typeorm-ts-node-commonjs migration:revert -d src/common/database/data-source.ts",
+    "migration:run": "typeorm-ts-node-commonjs migration:run -d src/common/database/data-source.ts --transaction none",
+    "migration:revert": "typeorm-ts-node-commonjs migration:revert -d src/common/database/data-source.ts --transaction none",
     "seed": "ts-node src/common/database/seed.ts",
     "test:db": "ts-node src/scripts/test-db-connection.ts",
     "check:requirements": "ts-node src/scripts/test-db-connection.ts"
