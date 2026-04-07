@@ -1,9 +1,22 @@
-import { Injectable } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, MoreThanOrEqual } from 'typeorm';
 import { User } from '../common/entities/user.entity';
 import { Content } from '../common/entities/content.entity';
 import { AdminSettings } from '../common/entities/admin-settings.entity';
+import { CreateAdminSettingDto } from './dto/create-admin-setting.dto';
+import { UpdateAdminSettingDto } from './dto/update-admin-setting.dto';
+import { UpsertAdminSettingDto } from './dto/upsert-admin-setting.dto';
+
+function isMaskedPlaceholder(value: string | undefined): boolean {
+  if (value === undefined) return false;
+  const t = value.trim();
+  return t.length >= 6 && /^\*+$/.test(t);
+}
 
 @Injectable()
 export class AdminService {
@@ -124,18 +137,77 @@ export class AdminService {
   }
 
   async getSettings() {
-    return this.settingsRepository.find();
+    return this.settingsRepository.find({ order: { key: 'ASC' } });
+  }
+
+  async getSettingById(id: string) {
+    const row = await this.settingsRepository.findOne({ where: { id } });
+    if (!row) throw new NotFoundException('Setting not found');
+    return row;
+  }
+
+  async createSetting(dto: CreateAdminSettingDto) {
+    const taken = await this.settingsRepository.exist({ where: { key: dto.key } });
+    if (taken) {
+      throw new ConflictException(`Setting with key "${dto.key}" already exists`);
+    }
+    const row = this.settingsRepository.create({
+      key: dto.key,
+      value: dto.value ?? null,
+      category: dto.category ?? null,
+      isEncrypted: dto.isEncrypted ?? false,
+    });
+    return this.settingsRepository.save(row);
+  }
+
+  async updateSettingById(id: string, dto: UpdateAdminSettingDto) {
+    const row = await this.settingsRepository.findOne({ where: { id } });
+    if (!row) throw new NotFoundException('Setting not found');
+    if (dto.key !== undefined && dto.key !== row.key) {
+      const taken = await this.settingsRepository.exist({ where: { key: dto.key } });
+      if (taken) throw new ConflictException('Key already in use');
+      row.key = dto.key;
+    }
+    if (dto.value !== undefined && !isMaskedPlaceholder(dto.value)) {
+      row.value = dto.value;
+    }
+    if (dto.category !== undefined) row.category = dto.category;
+    if (dto.isEncrypted !== undefined) row.isEncrypted = dto.isEncrypted;
+    return this.settingsRepository.save(row);
+  }
+
+  async removeSetting(id: string) {
+    const res = await this.settingsRepository.delete({ id });
+    if (!res.affected) throw new NotFoundException('Setting not found');
+  }
+
+  async upsertSetting(dto: UpsertAdminSettingDto) {
+    const existing = await this.settingsRepository.findOne({ where: { key: dto.key } });
+    const safeValue =
+      dto.value !== undefined && !isMaskedPlaceholder(dto.value)
+        ? dto.value
+        : undefined;
+    if (existing) {
+      if (safeValue !== undefined) existing.value = safeValue;
+      if (dto.category !== undefined) existing.category = dto.category;
+      if (dto.isEncrypted !== undefined) existing.isEncrypted = dto.isEncrypted;
+      return this.settingsRepository.save(existing);
+    }
+    const row = this.settingsRepository.create({
+      key: dto.key,
+      value:
+        dto.value === undefined
+          ? null
+          : isMaskedPlaceholder(dto.value)
+            ? null
+            : dto.value,
+      category: dto.category ?? null,
+      isEncrypted: dto.isEncrypted ?? false,
+    });
+    return this.settingsRepository.save(row);
   }
 
   async updateSetting(key: string, value: string) {
-    const setting = await this.settingsRepository.findOne({ where: { key } });
-    
-    if (setting) {
-      setting.value = value;
-      return this.settingsRepository.save(setting);
-    } else {
-      const newSetting = this.settingsRepository.create({ key, value });
-      return this.settingsRepository.save(newSetting);
-    }
+    return this.upsertSetting({ key, value });
   }
 }
