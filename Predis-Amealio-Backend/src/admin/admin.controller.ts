@@ -9,8 +9,10 @@ import {
   Post,
   Put,
   Query,
+  Req,
   UseGuards,
 } from '@nestjs/common';
+import type { Request } from 'express';
 import { AdminService } from './admin.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
@@ -53,13 +55,24 @@ export class AdminController {
   }
 
   @Get('settings')
-  async listSettings() {
-    return this.adminService.getSettings();
+  async listSettings(
+    @Query('search') search?: string,
+    @Query('category') category?: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+  ) {
+    return this.adminService.getSettings({
+      search,
+      category,
+      limit: limit ? parseInt(limit, 10) : undefined,
+      offset: offset ? parseInt(offset, 10) : undefined,
+    });
   }
 
   @Put('settings/upsert')
-  async upsertSetting(@Body() dto: UpsertAdminSettingDto) {
-    return this.adminService.upsertSetting(dto);
+  async upsertSetting(@Req() req: Request, @Body() dto: UpsertAdminSettingDto) {
+    const u: any = (req as any).user || {};
+    return this.adminService.upsertSetting(dto, { userId: u.userId, email: u.email });
   }
 
   @Get('settings/:id')
@@ -68,21 +81,42 @@ export class AdminController {
   }
 
   @Post('settings')
-  async createSetting(@Body() dto: CreateAdminSettingDto) {
-    return this.adminService.createSetting(dto);
+  async createSetting(@Req() req: Request, @Body() dto: CreateAdminSettingDto) {
+    const u: any = (req as any).user || {};
+    return this.adminService.createSetting(dto, { userId: u.userId, email: u.email });
   }
 
   @Patch('settings/:id')
   async patchSetting(
+    @Req() req: Request,
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateAdminSettingDto,
   ) {
-    return this.adminService.updateSettingById(id, dto);
+    const u: any = (req as any).user || {};
+    return this.adminService.updateSettingById(id, dto, { userId: u.userId, email: u.email });
   }
 
   @Delete('settings/:id')
-  async deleteSetting(@Param('id', ParseUUIDPipe) id: string) {
-    await this.adminService.removeSetting(id);
+  async deleteSetting(@Req() req: Request, @Param('id', ParseUUIDPipe) id: string) {
+    const u: any = (req as any).user || {};
+    await this.adminService.removeSetting(id, { userId: u.userId, email: u.email });
     return { ok: true };
+  }
+
+  @Get('settings-audit')
+  async listSettingsAudit(
+    @Query('key') key?: string,
+    @Query('action') action?: 'create' | 'update' | 'delete' | 'upsert',
+    @Query('actorUserId') actorUserId?: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+  ) {
+    return this.adminService.getSettingsAudit({
+      key,
+      action,
+      actorUserId,
+      limit: limit ? parseInt(limit, 10) : undefined,
+      offset: offset ? parseInt(offset, 10) : undefined,
+    });
   }
 }

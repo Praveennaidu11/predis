@@ -29,12 +29,13 @@ All require `JwtAuthGuard` + `RolesGuard` + `@Roles('admin')`.
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/admin/settings` | List all settings |
+| `GET` | `/admin/settings` | List settings (supports `search`, `category`, `limit`, `offset`; encrypted values are **masked**) |
 | `GET` | `/admin/settings/:id` | Get one by id |
 | `POST` | `/admin/settings` | Create (fails if `key` exists) |
 | `PATCH` | `/admin/settings/:id` | Partial update by id |
 | `DELETE` | `/admin/settings/:id` | Delete by id |
 | `PUT` | `/admin/settings/upsert` | Upsert by `key` (body: key, value, category?, isEncrypted?) |
+| `GET` | `/admin/settings-audit` | List audit events (supports `key`, `action`, `actorUserId`, `limit`, `offset`) |
 
 ### Files
 
@@ -107,6 +108,7 @@ Today the app still reads most secrets from **environment variables** at process
 - **Key format validation** on create/upsert (DTO `Matches` — letters, numbers, `.`, `_`, `-`).
 - **Do not wipe secrets**: values that look like a mask-only placeholder (trimmed string of `*` with length ≥ 6) are **ignored** on update: `upsertSetting` and `updateSettingById` skip changing `value` when the payload is only asterisks; new rows get `null` instead of saving a mask string.
 - **Sensitive fields** use `isEncrypted: true` on upsert from the UI for API keys and passwords (storage still plaintext until Phase 2).
+- **Encrypted values are masked on read**: `GET /admin/settings*` never returns raw values when `isEncrypted=true` (returns `********` or `null`).
 
 ### Files
 
@@ -115,9 +117,34 @@ Today the app still reads most secrets from **environment variables** at process
 
 ---
 
+## Phase 6 — Advanced Admin Settings + Audit UI (Completed)
+
+### UI additions
+
+In `Predis-Amealio-Frontend/src/app/admin/settings/page.tsx`:
+
+- **Advanced** tab
+  - Search + category filter
+  - Full CRUD (create / edit / delete)
+  - Secret-safe editing: encrypted values are never shown; leaving secret value blank keeps existing secret
+  - Delete confirmation requires typing the key
+- **Audit Log** tab
+  - Filter by key + action
+  - Displays “secret changed (redacted)” for encrypted changes
+
+### Backend additions
+
+- New entity: `Predis-Amealio-Backend/src/common/entities/admin-settings-audit.entity.ts`
+- Audit is written on: create / patch / upsert / delete with actor (`userId`, `email`) from JWT
+
+---
+
 ## Quick test (admin token)
 
 1. Login as admin; copy JWT.
 2. `GET http://localhost:8001/api/admin/settings` with `Authorization: Bearer <token>`.
 3. `PUT http://localhost:8001/api/admin/settings/upsert` with JSON `{ "key": "general.platform_name", "value": "Amealio", "category": "general" }`.
-4. Open **Admin → Settings** in the frontend and verify load/save.
+4. Open **Admin → Settings** in the frontend and verify:
+   - Curated tabs load/save (AI/Integrations/Email/General)
+   - Advanced tab can create/edit/delete and refresh
+   - Audit Log tab shows the change events

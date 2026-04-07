@@ -8,12 +8,65 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { toast } from 'sonner';
-import { Save, Key, Mail, Loader2 } from 'lucide-react';
+import {
+  Save,
+  Key,
+  Mail,
+  Loader2,
+  Plus,
+  Shield,
+  MoreVertical,
+  RefreshCw,
+  Search,
+} from 'lucide-react';
 import {
   fetchAdminSettings,
+  fetchAdminSettingsAdvanced,
+  fetchAdminSettingsAudit,
+  createAdminSetting,
+  patchAdminSetting,
+  deleteAdminSetting,
+  type AdminSettingRow,
+  type AdminSettingsAuditRow,
   upsertAdminSetting,
   isMaskedPlaceholder,
 } from '@/lib/api/adminSettings';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import { Badge } from '@/components/ui/badge';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Separator } from '@/components/ui/separator';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 
 const KEYS = {
   openaiKey: 'ai.openai_api_key',
@@ -83,10 +136,47 @@ function mapRowsToForm(
   };
 }
 
+function actionBadgeClass(action: AdminSettingsAuditRow['action']): string {
+  switch (action) {
+    case 'create':
+      return 'bg-emerald-500/10 text-emerald-700 border-emerald-200';
+    case 'update':
+      return 'bg-blue-500/10 text-blue-700 border-blue-200';
+    case 'upsert':
+      return 'bg-violet-500/10 text-violet-700 border-violet-200';
+    case 'delete':
+      return 'bg-rose-500/10 text-rose-700 border-rose-200';
+    default:
+      return '';
+  }
+}
+
 export default function AdminSettingsPage() {
   const [settings, setSettings] = useState<FormState>(emptyForm);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState<string | null>(null);
+
+  const [advancedLoading, setAdvancedLoading] = useState(false);
+  const [advancedRows, setAdvancedRows] = useState<AdminSettingRow[]>([]);
+  const [advancedSearch, setAdvancedSearch] = useState('');
+  const [advancedCategory, setAdvancedCategory] = useState<string>('all');
+
+  const [editOpen, setEditOpen] = useState(false);
+  const [editMode, setEditMode] = useState<'create' | 'edit'>('create');
+  const [editRowId, setEditRowId] = useState<string | null>(null);
+  const [editKey, setEditKey] = useState('');
+  const [editCategory, setEditCategory] = useState('');
+  const [editIsEncrypted, setEditIsEncrypted] = useState(false);
+  const [editValue, setEditValue] = useState('');
+
+  const [deleteTarget, setDeleteTarget] = useState<AdminSettingRow | null>(null);
+  const [deleteConfirmKey, setDeleteConfirmKey] = useState('');
+
+  const [auditLoading, setAuditLoading] = useState(false);
+  const [auditRows, setAuditRows] = useState<AdminSettingsAuditRow[]>([]);
+  const [auditTotal, setAuditTotal] = useState(0);
+  const [auditKeyFilter, setAuditKeyFilter] = useState('');
+  const [auditActionFilter, setAuditActionFilter] = useState<'all' | AdminSettingsAuditRow['action']>('all');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -101,9 +191,55 @@ export default function AdminSettingsPage() {
     }
   }, []);
 
+  const loadAdvanced = useCallback(async () => {
+    setAdvancedLoading(true);
+    try {
+      const rows = await fetchAdminSettingsAdvanced({
+        search: advancedSearch || undefined,
+        category: advancedCategory === 'all' ? undefined : advancedCategory,
+        limit: 200,
+        offset: 0,
+      });
+      setAdvancedRows(rows);
+    } catch {
+      toast.error('Failed to load settings (advanced)');
+      setAdvancedRows([]);
+    } finally {
+      setAdvancedLoading(false);
+    }
+  }, [advancedCategory, advancedSearch]);
+
+  const loadAudit = useCallback(async () => {
+    setAuditLoading(true);
+    try {
+      const res = await fetchAdminSettingsAudit({
+        key: auditKeyFilter || undefined,
+        action: auditActionFilter === 'all' ? undefined : auditActionFilter,
+        limit: 100,
+        offset: 0,
+      });
+      setAuditRows(res.rows);
+      setAuditTotal(res.total);
+    } catch {
+      toast.error('Failed to load audit log');
+      setAuditRows([]);
+      setAuditTotal(0);
+    } finally {
+      setAuditLoading(false);
+    }
+  }, [auditActionFilter, auditKeyFilter]);
+
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    loadAdvanced();
+  }, [loadAdvanced]);
+
+  useEffect(() => {
+    loadAudit();
+  }, [loadAudit]);
 
   const upsertField = async (
     formKey: keyof FormState,
@@ -182,21 +318,58 @@ export default function AdminSettingsPage() {
 
   return (
     <DashboardLayout>
-      <div>
-        <h1 className="text-3xl font-bold mb-8">Platform Settings</h1>
+      <div className="w-full px-4 md:px-8 py-4 md:py-6 space-y-6">
+        <div className="flex flex-col gap-1">
+          <h1 className="text-3xl font-semibold tracking-tight">Platform settings</h1>
+          <p className="text-sm text-muted-foreground">
+            Configure integrations, email, and platform defaults. Use <span className="font-medium">Advanced</span> for key/value CRUD and <span className="font-medium">Audit Log</span> for change history.
+          </p>
+        </div>
 
         {loading ? (
-          <div className="flex items-center gap-2 text-muted-foreground">
+          <div className="flex items-center gap-2 text-muted-foreground rounded-lg border bg-card p-4">
             <Loader2 className="h-5 w-5 animate-spin" />
             Loading settings…
           </div>
         ) : (
-          <Tabs defaultValue="ai" className="space-y-6">
-            <TabsList>
-              <TabsTrigger value="ai">AI Models</TabsTrigger>
-              <TabsTrigger value="integrations">Integrations</TabsTrigger>
-              <TabsTrigger value="email">Email</TabsTrigger>
-              <TabsTrigger value="general">General</TabsTrigger>
+          <Tabs defaultValue="ai" className="space-y-4">
+            <TabsList className="w-full justify-start flex-wrap h-auto bg-muted/40">
+              <TabsTrigger
+                value="ai"
+                className="data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:border-border data-[state=active]:shadow-sm"
+              >
+                AI Models
+              </TabsTrigger>
+              <TabsTrigger
+                value="integrations"
+                className="data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:border-border data-[state=active]:shadow-sm"
+              >
+                Integrations
+              </TabsTrigger>
+              <TabsTrigger
+                value="email"
+                className="data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:border-border data-[state=active]:shadow-sm"
+              >
+                Email
+              </TabsTrigger>
+              <TabsTrigger
+                value="general"
+                className="data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:border-border data-[state=active]:shadow-sm"
+              >
+                General
+              </TabsTrigger>
+              <TabsTrigger
+                value="advanced"
+                className="data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:border-border data-[state=active]:shadow-sm"
+              >
+                Advanced
+              </TabsTrigger>
+              <TabsTrigger
+                value="audit"
+                className="data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:border-border data-[state=active]:shadow-sm"
+              >
+                Audit Log
+              </TabsTrigger>
             </TabsList>
 
             <TabsContent value="ai">
@@ -454,6 +627,427 @@ export default function AdminSettingsPage() {
                     )}
                     Save General Settings
                   </Button>
+                </CardContent>
+              </Card>
+            </TabsContent>
+
+            <TabsContent value="advanced">
+              <Card>
+                <CardHeader className="space-y-1">
+                  <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                    <div className="space-y-1">
+                      <CardTitle>Advanced</CardTitle>
+                      <p className="text-sm text-muted-foreground">
+                        Full key/value CRUD. Secret rows are always masked and never returned to the browser.
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="outline"
+                        onClick={loadAdvanced}
+                        disabled={advancedLoading}
+                      >
+                        {advancedLoading ? (
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        ) : (
+                          <RefreshCw className="h-4 w-4 mr-2" />
+                        )}
+                        Refresh
+                      </Button>
+                      <Button
+                        onClick={() => {
+                          setEditMode('create');
+                          setEditRowId(null);
+                          setEditKey('');
+                          setEditCategory('');
+                          setEditIsEncrypted(false);
+                          setEditValue('');
+                          setEditOpen(true);
+                        }}
+                      >
+                        <Plus className="h-4 w-4 mr-2" />
+                        New
+                      </Button>
+                    </div>
+                  </div>
+                </CardHeader>
+                <Separator />
+                <CardContent className="space-y-4 pt-6">
+                  <div className="flex flex-col md:flex-row md:items-end gap-3">
+                    <div className="flex-1">
+                      <Label>Search</Label>
+                      <div className="relative">
+                        <Search className="h-4 w-4 text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2" />
+                        <Input
+                          className="pl-9"
+                          value={advancedSearch}
+                          onChange={(e) => setAdvancedSearch(e.target.value)}
+                          placeholder="Search by key or category…"
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') loadAdvanced();
+                          }}
+                        />
+                      </div>
+                    </div>
+                    <div className="w-full md:w-64">
+                      <Label>Category</Label>
+                      <Select value={advancedCategory} onValueChange={setAdvancedCategory}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Category" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All</SelectItem>
+                          {Array.from(
+                            new Set(
+                              advancedRows
+                                .map((r) => r.category)
+                                .filter((c): c is string => Boolean(c)),
+                            ),
+                          )
+                            .sort()
+                            .map((c) => (
+                              <SelectItem key={c} value={c}>
+                                {c}
+                              </SelectItem>
+                            ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="text-sm text-muted-foreground md:pb-2">
+                      {advancedRows.length} settings
+                    </div>
+                  </div>
+
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Key</TableHead>
+                        <TableHead>Category</TableHead>
+                        <TableHead>Value</TableHead>
+                        <TableHead>Updated</TableHead>
+                        <TableHead className="text-right w-[72px]">Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {advancedRows.map((r) => (
+                        <TableRow key={r.id}>
+                          <TableCell className="font-mono text-xs">{r.key}</TableCell>
+                          <TableCell>
+                            {r.category ? (
+                              <Badge variant="secondary">{r.category}</Badge>
+                            ) : (
+                              <span className="text-muted-foreground">—</span>
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            {r.isEncrypted ? (
+                              <Badge variant="secondary" className="gap-1">
+                                <Shield className="h-3 w-3" />
+                                secret
+                              </Badge>
+                            ) : (
+                              <span className="truncate block max-w-[520px]">
+                                {r.value ?? <span className="text-muted-foreground">—</span>}
+                              </span>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-sm text-muted-foreground">
+                            {new Date(r.updatedAt).toLocaleString()}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button variant="ghost" size="sm" aria-label="Row actions">
+                                  <MoreVertical className="h-4 w-4" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end">
+                                <DropdownMenuItem
+                                  onClick={() => {
+                                    setEditMode('edit');
+                                    setEditRowId(r.id);
+                                    setEditKey(r.key);
+                                    setEditCategory(r.category ?? '');
+                                    setEditIsEncrypted(r.isEncrypted);
+                                    setEditValue(r.isEncrypted ? '' : r.value ?? '');
+                                    setEditOpen(true);
+                                  }}
+                                >
+                                  Edit
+                                </DropdownMenuItem>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem
+                                  onClick={() => {
+                                    setDeleteTarget(r);
+                                    setDeleteConfirmKey('');
+                                  }}
+                                  className="text-destructive focus:text-destructive"
+                                >
+                                  Delete
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                      {advancedRows.length === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={5} className="text-center text-muted-foreground">
+                            {advancedLoading ? 'Loading…' : 'No settings found'}
+                          </TableCell>
+                        </TableRow>
+                      ) : null}
+                    </TableBody>
+                  </Table>
+                </CardContent>
+              </Card>
+
+              <Dialog open={editOpen} onOpenChange={setEditOpen}>
+                <DialogContent>
+                  <DialogHeader>
+                    <DialogTitle>{editMode === 'create' ? 'Create setting' : 'Edit setting'}</DialogTitle>
+                    <DialogDescription>
+                      For secret values, enter a new value to replace it. Leaving it blank keeps the current secret.
+                    </DialogDescription>
+                  </DialogHeader>
+
+                  <div className="space-y-3">
+                    <div>
+                      <Label>Key</Label>
+                      <Input
+                        value={editKey}
+                        onChange={(e) => setEditKey(e.target.value)}
+                        placeholder="general.platform_name"
+                        disabled={editMode === 'edit'}
+                      />
+                    </div>
+                    <div>
+                      <Label>Category</Label>
+                      <Input
+                        value={editCategory}
+                        onChange={(e) => setEditCategory(e.target.value)}
+                        placeholder="general"
+                      />
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <input
+                        id="isEncrypted"
+                        type="checkbox"
+                        checked={editIsEncrypted}
+                        onChange={(e) => setEditIsEncrypted(e.target.checked)}
+                      />
+                      <Label htmlFor="isEncrypted">Treat as secret (masked)</Label>
+                    </div>
+                    <div>
+                      <Label>Value</Label>
+                      <Input
+                        type={editIsEncrypted ? 'password' : 'text'}
+                        autoComplete="off"
+                        value={editValue}
+                        onChange={(e) => setEditValue(e.target.value)}
+                        placeholder={editIsEncrypted ? 'Enter new secret to replace' : 'Value'}
+                      />
+                      {editIsEncrypted ? (
+                        <p className="text-xs text-muted-foreground mt-1">
+                          Saving a mask-only value like <span className="font-mono">********</span> will be ignored.
+                        </p>
+                      ) : null}
+                    </div>
+                  </div>
+
+                  <DialogFooter>
+                    <Button
+                      variant="outline"
+                      onClick={() => setEditOpen(false)}
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      onClick={async () => {
+                        try {
+                          if (!editKey.trim()) {
+                            toast.error('Key is required');
+                            return;
+                          }
+
+                          if (editMode === 'create') {
+                            await createAdminSetting({
+                              key: editKey.trim(),
+                              category: editCategory.trim() || undefined,
+                              isEncrypted: editIsEncrypted,
+                              value: editValue,
+                            });
+                            toast.success('Setting created');
+                          } else if (editRowId) {
+                            const payload: any = {
+                              category: editCategory.trim() || null,
+                              isEncrypted: editIsEncrypted,
+                            };
+                            // Only send value when user actually typed something (esp. for secrets).
+                            if (editValue.trim().length > 0) payload.value = editValue;
+                            if (editIsEncrypted && isMaskedPlaceholder(editValue)) delete payload.value;
+                            await patchAdminSetting(editRowId, payload);
+                            toast.success('Setting updated');
+                          }
+                          setEditOpen(false);
+                          await Promise.all([loadAdvanced(), loadAudit(), load()]);
+                        } catch (e: any) {
+                          toast.error('Save failed', {
+                            description: String(e?.response?.data?.message ?? e?.message ?? ''),
+                          });
+                        }
+                      }}
+                    >
+                      <Save className="h-4 w-4 mr-2" />
+                      Save
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
+
+              <AlertDialog open={Boolean(deleteTarget)} onOpenChange={(o) => !o && setDeleteTarget(null)}>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Delete setting?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      This is permanent. To confirm, type the key exactly:
+                      <div className="mt-2 font-mono text-xs">{deleteTarget?.key}</div>
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <div className="space-y-2">
+                    <Label>Confirm key</Label>
+                    <Input
+                      value={deleteConfirmKey}
+                      onChange={(e) => setDeleteConfirmKey(e.target.value)}
+                      placeholder="Type the key to confirm"
+                    />
+                  </div>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel onClick={() => setDeleteTarget(null)}>
+                      Cancel
+                    </AlertDialogCancel>
+                    <AlertDialogAction
+                      onClick={async () => {
+                        if (!deleteTarget) return;
+                        if (deleteConfirmKey !== deleteTarget.key) {
+                          toast.error('Key does not match');
+                          return;
+                        }
+                        try {
+                          await deleteAdminSetting(deleteTarget.id);
+                          toast.success('Setting deleted');
+                          setDeleteTarget(null);
+                          await Promise.all([loadAdvanced(), loadAudit(), load()]);
+                        } catch {
+                          toast.error('Delete failed');
+                        }
+                      }}
+                      className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                    >
+                      Delete
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            </TabsContent>
+
+            <TabsContent value="audit">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Audit log</CardTitle>
+                </CardHeader>
+                <Separator />
+                <CardContent className="space-y-4 pt-6">
+                  <div className="flex flex-col md:flex-row md:items-end gap-3">
+                    <div className="flex-1">
+                      <Label>Key</Label>
+                      <Input
+                        value={auditKeyFilter}
+                        onChange={(e) => setAuditKeyFilter(e.target.value)}
+                        placeholder="Exact key (optional)"
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') loadAudit();
+                        }}
+                      />
+                    </div>
+                    <div className="w-full md:w-48">
+                      <Label>Action</Label>
+                      <Select
+                        value={auditActionFilter}
+                        onValueChange={(v) => setAuditActionFilter(v as any)}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Action" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All</SelectItem>
+                          <SelectItem value="create">create</SelectItem>
+                          <SelectItem value="update">update</SelectItem>
+                          <SelectItem value="upsert">upsert</SelectItem>
+                          <SelectItem value="delete">delete</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="flex items-center gap-2 md:pb-1">
+                      <Button variant="outline" onClick={loadAudit} disabled={auditLoading}>
+                        {auditLoading ? (
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        ) : (
+                          <RefreshCw className="h-4 w-4 mr-2" />
+                        )}
+                        Refresh
+                      </Button>
+                      <div className="text-sm text-muted-foreground">
+                        {auditRows.length} / {auditTotal}
+                      </div>
+                    </div>
+                  </div>
+
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>When</TableHead>
+                        <TableHead>Action</TableHead>
+                        <TableHead>Key</TableHead>
+                        <TableHead>Actor</TableHead>
+                        <TableHead>Change</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {auditRows.map((a) => (
+                        <TableRow key={a.id}>
+                          <TableCell className="text-sm text-muted-foreground">
+                            {new Date(a.createdAt).toLocaleString()}
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant="outline" className={actionBadgeClass(a.action)}>
+                              {a.action}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="font-mono text-xs">{a.settingKey}</TableCell>
+                          <TableCell className="text-sm">
+                            {a.actorEmail ?? a.actorUserId ?? <span className="text-muted-foreground">—</span>}
+                          </TableCell>
+                          <TableCell className="text-sm">
+                            {a.wasEncrypted || a.oldValueRedacted || a.newValueRedacted ? (
+                              <span className="text-muted-foreground">Secret changed (redacted)</span>
+                            ) : (
+                              <span className="font-mono text-xs">
+                                {String(a.oldValue ?? 'null')} → {String(a.newValue ?? 'null')}
+                              </span>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                      {auditRows.length === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={5} className="text-center text-muted-foreground">
+                            {auditLoading ? 'Loading…' : 'No audit events'}
+                          </TableCell>
+                        </TableRow>
+                      ) : null}
+                    </TableBody>
+                  </Table>
                 </CardContent>
               </Card>
             </TabsContent>
