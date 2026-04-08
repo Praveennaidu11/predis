@@ -5,7 +5,6 @@ import {
   CreateDateColumn,
   UpdateDateColumn,
   OneToMany,
-  Unique,
 } from 'typeorm';
 import { Brand } from './brand.entity';
 import { Content } from './content.entity';
@@ -14,12 +13,11 @@ import { Transaction } from './transaction.entity';
 import { Payment } from './payment.entity';
 
 @Entity('users')
-@Unique(['email', 'role'])
 export class User {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Column()
+  @Column({ unique: true })
   email: string;
 
   @Column({ name: 'password_hash', nullable: true })

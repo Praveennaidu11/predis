@@ -1,13 +1,11 @@
 'use client';
 
-import { Suspense, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import axios from 'axios';
 import { toast } from 'sonner';
 
-export const dynamic = 'force-dynamic';
-
-function OAuthCallbackInner() {
+export default function OAuthCallbackPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [status, setStatus] = useState<'loading' | 'success' | 'error'>('loading');
@@ -38,7 +36,10 @@ function OAuthCallbackInner() {
       setMessage(`Connecting to ${platform}...`);
 
       // Exchange code for access token via backend
-      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:4000';
+      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL;
+      if (!backendUrl) {
+        throw new Error('Backend URL is not configured');
+      }
       const token = localStorage.getItem('token');
 
       const response = await axios.post(
@@ -136,27 +137,5 @@ function OAuthCallbackInner() {
         </div>
       </div>
     </div>
-  );
-}
-
-export default function OAuthCallbackPage() {
-  return (
-    <Suspense
-      fallback={
-        <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-indigo-500 to-purple-600">
-          <div className="max-w-md w-full bg-white rounded-2xl shadow-2xl p-8">
-            <div className="text-center">
-              <div className="mb-4">
-                <div className="animate-spin rounded-full h-16 w-16 border-b-4 border-indigo-600 mx-auto"></div>
-              </div>
-              <h2 className="text-2xl font-bold text-gray-900 mb-2">Connecting...</h2>
-              <p className="text-gray-600 mb-6">Processing OAuth callback...</p>
-            </div>
-          </div>
-        </div>
-      }
-    >
-      <OAuthCallbackInner />
-    </Suspense>
   );
 }

@@ -8,29 +8,26 @@ import { AuthGuard } from '@nestjs/passport';
 import { BadRequestException } from '@nestjs/common';
 
 @Controller('social')
+@UseGuards(JwtAuthGuard)
 export class SocialController {
   constructor(private socialService: SocialService) {}
 
   @Get('accounts')
-  @UseGuards(JwtAuthGuard)
   async getAccounts(@Request() req) {
     return this.socialService.getUserAccounts(req.user.userId);
   }
 
   @Post('connect')
-  @UseGuards(JwtAuthGuard)
   async connectAccount(@Request() req, @Body() dto: ConnectSocialDto) {
     return this.socialService.connectAccount(req.user.userId, dto);
   }
 
   @Delete('accounts/:id')
-  @UseGuards(JwtAuthGuard)
   async disconnectAccount(@Request() req, @Param('id') accountId: string) {
     return this.socialService.disconnectAccount(req.user.userId, accountId);
   }
 
   @Post('publish')
-  @UseGuards(JwtAuthGuard)
   async publishContent(@Request() req, @Body() dto: PublishContentDto) {
     return this.socialService.publishContent(req.user.userId, dto);
   }
@@ -59,7 +56,6 @@ export class SocialController {
   // }
 
   @Get('oauth/callback/manual')
-  @UseGuards(JwtAuthGuard)
   async manualFacebookCallback(@Request() req, @Query() query: any) {
     try {
       if (query.error) {
@@ -89,7 +85,6 @@ export class SocialController {
   }
 
   @Get('oauth')
-  @UseGuards(JwtAuthGuard)
   // @UseGuards(AuthGuard('facebook'))
   async redirectToFacebook(@Request() req) {
     // This endpoint is protected by Passport Facebook strategy
@@ -98,7 +93,6 @@ export class SocialController {
   }
 
   @Get('oauth/url')
-  @UseGuards(JwtAuthGuard)
   getFacebookAuthUrl() {
     const url = `https://www.facebook.com/v20.0/dialog/oauth
     ?client_id=${process.env.FACEBOOK_APP_ID}
@@ -111,18 +105,7 @@ export class SocialController {
     return { url: url.replace(/\s+/g, '') };
   }
 
-  @Get('oauth/url/:platform')
-  @UseGuards(JwtAuthGuard)
-  getOAuthUrl(
-    @Param('platform') platform: string,
-    @Query('redirectUri') redirectUri: string,
-  ) {
-    const url = this.socialService.getAuthorizationUrl(platform, redirectUri);
-    return { url };
-  }
-
   @Post('oauth/callback')
-  @UseGuards(JwtAuthGuard)
   async handleOAuthCallback(@Request() req, @Body() dto: OAuthCallbackDto) {
     return this.socialService.handleOAuthCallback(req.user.userId, dto);
   }

@@ -5,13 +5,10 @@ import DashboardLayout from '@/components/layout/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Users, FileText, TrendingUp, DollarSign } from 'lucide-react';
 import { toast } from 'sonner';
-import apiClient from '@/lib/api';
-import { useRouter } from 'next/navigation';
 
 export default function AdminDashboardPage() {
   const [stats, setStats] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const router = useRouter();
 
   useEffect(() => {
     fetchDashboardData();
@@ -19,8 +16,16 @@ export default function AdminDashboardPage() {
 
   const fetchDashboardData = async () => {
     try {
-      const response = await apiClient.get('/admin/stats');
-      setStats(response.data);
+      const response = await fetch('/api/admin/stats', {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`,
+        },
+      });
+
+      if (!response.ok) throw new Error('Failed to fetch');
+
+      const data = await response.json();
+      setStats(data);
     } catch (error: any) {
       toast.error('Error', {
         description: 'Failed to load dashboard data',
@@ -41,10 +46,10 @@ export default function AdminDashboardPage() {
   }
 
   const statCards = [
-    { title: 'Total Users', value: stats?.totalUsers || 0, icon: Users, color: 'text-blue-500', change: '+12%', href: '/admin/users' },
-    { title: 'Active Users', value: stats?.activeUsers || 0, icon: TrendingUp, color: 'text-green-500', change: '+8%', href: '/admin/users' },
-    { title: 'Total Content', value: stats?.totalContent || 0, icon: FileText, color: 'text-purple-500', change: '+24%', href: '/admin/content' },
-    { title: 'Revenue (Monthly)', value: `₹${(stats?.revenueThisMonth || 0).toLocaleString()}`, icon: DollarSign, color: 'text-emerald-500', change: '+15%', href: '/admin/settings' },
+    { title: 'Total Users', value: stats?.totalUsers || 0, icon: Users, color: 'text-blue-500', change: '+12%' },
+    { title: 'Active Users', value: stats?.activeUsers || 0, icon: TrendingUp, color: 'text-green-500', change: '+8%' },
+    { title: 'Total Content', value: stats?.totalContent || 0, icon: FileText, color: 'text-purple-500', change: '+24%' },
+    { title: 'Revenue (Monthly)', value: `₹${(stats?.revenueThisMonth || 0).toLocaleString()}`, icon: DollarSign, color: 'text-emerald-500', change: '+15%' },
   ];
 
   return (
@@ -56,16 +61,7 @@ export default function AdminDashboardPage() {
           {statCards.map((stat) => {
             const Icon = stat.icon;
             return (
-              <Card
-                key={stat.title}
-                role="button"
-                tabIndex={0}
-                onClick={() => router.push(stat.href)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') router.push(stat.href);
-                }}
-                className="cursor-pointer transition-all duration-200 hover:shadow-lg hover:-translate-y-0.5 hover:bg-accent/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400"
-              >
+              <Card key={stat.title}>
                 <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                   <CardTitle className="text-sm font-medium">{stat.title}</CardTitle>
                   <Icon className={`h-5 w-5 ${stat.color}`} />
@@ -80,15 +76,7 @@ export default function AdminDashboardPage() {
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-          <Card
-            role="button"
-            tabIndex={0}
-            onClick={() => router.push('/admin/users')}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' || e.key === ' ') router.push('/admin/users');
-            }}
-            className="cursor-pointer transition-all duration-200 hover:shadow-lg hover:-translate-y-0.5 hover:bg-accent/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400"
-          >
+          <Card>
             <CardHeader>
               <CardTitle>Users by Role</CardTitle>
             </CardHeader>
@@ -106,15 +94,7 @@ export default function AdminDashboardPage() {
             </CardContent>
           </Card>
 
-          <Card
-            role="button"
-            tabIndex={0}
-            onClick={() => router.push('/admin/content')}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' || e.key === ' ') router.push('/admin/content');
-            }}
-            className="cursor-pointer transition-all duration-200 hover:shadow-lg hover:-translate-y-0.5 hover:bg-accent/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400"
-          >
+          <Card>
             <CardHeader>
               <CardTitle>Content by Status</CardTitle>
             </CardHeader>
@@ -137,15 +117,7 @@ export default function AdminDashboardPage() {
           </Card>
         </div>
 
-        <Card
-          role="button"
-          tabIndex={0}
-          onClick={() => router.push('/admin/users')}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' || e.key === ' ') router.push('/admin/users');
-          }}
-          className="cursor-pointer transition-all duration-200 hover:shadow-lg hover:-translate-y-0.5 hover:bg-accent/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400"
-        >
+        <Card>
           <CardHeader>
             <CardTitle>Recent Signups</CardTitle>
           </CardHeader>

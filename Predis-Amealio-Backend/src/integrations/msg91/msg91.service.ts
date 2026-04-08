@@ -84,7 +84,8 @@ export class MSG91Service {
   private readonly baseUrl = 'https://control.msg91.com/api/v5';
 
   // --- Mock/In-Memory Store for Email OTP ---
-  private emailOtpStore: Record<string, { otp: string; expiresAt: number }> = {};
+  // NOTE: In a real app, this should be a DB/Redis/Cache store for persistence.
+  private emailOtpStore: Record<string, string> = {};
   // -------------------------------------------
 
   // Email transporter for sending OTP emails
@@ -129,22 +130,20 @@ export class MSG91Service {
   /**
    * 📧 Sends an OTP to the provided email address.
    * Uses Nodemailer if SMTP is configured, otherwise logs to console (for development).
-   * The generated OTP is stored in a temporary in-memory store with a 2-minute expiry.
+   * The generated OTP is stored in a temporary in-memory store.
    */
   async sendEmailOTP(email: string): Promise<{ success: boolean; message: string; otp?: string }> {
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    const expiryMinutes = 2;
-    const expiresAt = Date.now() + expiryMinutes * 60 * 1000;
 
-    // 1. Store the OTP temporarily with expiry
-    this.emailOtpStore[email] = { otp, expiresAt };
+    // 1. Store the OTP temporarily
+    this.emailOtpStore[email] = otp;
     
     // 2. Send email if transporter is configured, otherwise log to console
     if (this.emailTransporter) {
       try {
         const mailOptions = {
           from: this.configService.get('SMTP_FROM') || this.configService.get('SMTP_USER') || 'noreply@amealio.com',
-          to: email, 
+          to: email, // This will be ANY email the user provides during signup/login
           subject: 'Your Amealio Verification Code',
           html: `
             <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
@@ -153,11 +152,11 @@ export class MSG91Service {
               <div style="background-color: #f3f4f6; padding: 20px; text-align: center; margin: 20px 0; border-radius: 8px;">
                 <h1 style="color: #6366f1; font-size: 32px; letter-spacing: 8px; margin: 0;">${otp}</h1>
               </div>
-              <p style="color: #6b7280; font-size: 14px;">This code will expire in ${expiryMinutes} minutes. Please do not share this code with anyone.</p>
+              <p style="color: #6b7280; font-size: 14px;">This code will expire in 5 minutes. Please do not share this code with anyone.</p>
               <p style="color: #6b7280; font-size: 14px;">If you didn't request this code, please ignore this email.</p>
             </div>
           `,
-          text: `Your Amealio verification code is: ${otp}. This code will expire in ${expiryMinutes} minutes.`,
+          text: `Your Amealio verification code is: ${otp}. This code will expire in 5 minutes.`,
         };
 
         await this.emailTransporter.sendMail(mailOptions);
@@ -166,10 +165,12 @@ export class MSG91Service {
         return { success: true, message: 'Email OTP sent successfully' };
       } catch (error) {
         this.logger.error(`❌ Failed to send email OTP to ${email}:`, error.message);
+        // Fall back to logging if email fails
         this.logger.log(`[FALLBACK] OTP for ${email}: ${otp}`);
         return { success: true, message: 'Email OTP generated (check console for OTP)', otp };
       }
     } else {
+      // No SMTP configured - log to console for development
       this.logger.log(`[MOCK EMAIL OTP] OTP for ${email}: ${otp}`);
       this.logger.warn(`⚠️ SMTP not configured. OTP logged to console: ${otp}`);
       return { success: true, message: 'Email OTP generated (check backend console)', otp };
@@ -178,22 +179,15 @@ export class MSG91Service {
 
   /**
    * 🔑 Verifies the OTP sent to the email address (Mocked).
-   * Checks against the temporary in-memory store and ensures it hasn't expired.
+   * NOTE: This mocks the verification against the temporary in-memory store.
+   * In a real application, you would check a DB/Redis store.
    */
   async verifyEmailOTP(email: string, otp: string): Promise<boolean> {
-    const record = this.emailOtpStore[email];
+    const storedOtp = this.emailOtpStore[email];
 
-    if (!record) return false;
-
-    // Check if OTP has expired
-    if (Date.now() > record.expiresAt) {
-      this.logger.warn(`Email OTP expired for ${email}`);
-      delete this.emailOtpStore[email];
-      return false;
-    }
-
-    if (record.otp === otp) {
+    if (storedOtp && storedOtp === otp) {
       this.logger.log(`Email OTP verified for ${email}`);
+      // Clean up the OTP after successful verification
       delete this.emailOtpStore[email];
       return true;
     }

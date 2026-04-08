@@ -6,10 +6,13 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { FileText, Calendar, CheckCircle, Eye, ThumbsUp, Share2 } from 'lucide-react';
 import RecentContentSection from '@/components/dashboard/RecentContentSection';
 import { contentApi, DashboardStats } from '@/lib/api/content';
+import { toast } from 'sonner';
+import { useRouter } from 'next/navigation';
 
 export default function MerchantDashboardPage() {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [loading, setLoading] = useState(true);
+  const router = useRouter();
 
   useEffect(() => {
     fetchDashboardStats();
@@ -18,7 +21,9 @@ export default function MerchantDashboardPage() {
   const fetchDashboardStats = async () => {
     try {
       setLoading(true);
+      console.log('Fetching dashboard stats...');
       const response = await contentApi.getDashboardStats();
+      console.log('Dashboard stats response:', response.data);
       setStats(response.data);
     } catch (error) {
       console.error('Failed to fetch dashboard stats:', error);
@@ -50,6 +55,34 @@ export default function MerchantDashboardPage() {
   const handleContentClick = (content: any) => {
     console.log('Navigate to content details:', content.id);
     // Add navigation logic here
+  };
+
+  const handleShareClick = async (content: any) => {
+    try {
+      const accountsResp = await contentApi.getSocialAccounts();
+      const accounts = accountsResp.data || [];
+
+      if (!accounts.length) {
+        toast.error('No connected social accounts. Connect one to share.');
+        router.push('/merchant/social');
+        return;
+      }
+
+      const active = accounts.find((a: any) => a.isActive) || accounts[0];
+      await contentApi.publishContent({
+        contentId: content.id,
+        accountId: active.id,
+      });
+
+      toast.success(`Published to ${active.platform}.`);
+    } catch (err: any) {
+      const message =
+        err?.response?.data?.message ||
+        err?.response?.data?.error ||
+        err?.message ||
+        'Failed to publish content';
+      toast.error(message);
+    }
   };
 
   if (loading) {
@@ -98,7 +131,10 @@ export default function MerchantDashboardPage() {
           })}
         </div>
 
-        <RecentContentSection onContentClick={handleContentClick} />
+        <RecentContentSection 
+          onContentClick={handleContentClick}
+          onShareClick={handleShareClick}
+        />
       </div>
     </DashboardLayout>
   );

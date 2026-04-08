@@ -4,10 +4,11 @@ import { SocialService } from './social.service';
 import { SocialController } from './social.controller';
 import { SocialAccount } from '../common/entities/social-account.entity';
 import { Content } from '../common/entities/content.entity';
+import { Analytics } from '../common/entities/analytics.entity';
 import { FacebookStrategy } from './facebook.strategy';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([SocialAccount, Content])],
+  imports: [TypeOrmModule.forFeature([SocialAccount, Content, Analytics])],
   controllers: [SocialController],
   providers: [SocialService, FacebookStrategy],
   exports: [SocialService],

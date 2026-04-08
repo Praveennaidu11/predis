@@ -14,8 +14,8 @@ export default function CalendarPage() {
     async function loadScheduled() {
       try {
         setLoading(true);
-        const response = await contentApi.getContent('scheduled');
-        setItems(response.data || []);
+        const response = await contentApi.getContent({ filter: 'scheduled', limit: 100 });
+        setItems(response.data.data || []);
       } catch (error) {
         console.error('Failed to load scheduled content:', error);
         setItems([]);
@@ -78,47 +78,47 @@ export default function CalendarPage() {
                       <span>{new Date(dateKey).toLocaleDateString()}</span>
                     </div>
 
-                  <div className="space-y-2">
-                    {groupedByDate[dateKey].map((item) => (
-                      <div
-                        key={item.id}
-                        className="flex items-center justify-between rounded-lg border bg-white px-4 py-3 text-xs gap-4"
-                      >
-                        <div className="space-y-1 flex-1 min-w-0">
-                          <div className="flex flex-wrap items-center gap-2">
-                            {item.platform && (
-                              <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-medium text-gray-700">
-                                {getPlatformIcon(item.platform)}
-                                <span>{item.platform}</span>
-                              </span>
-                            )}
-                            <span className="rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-medium text-blue-700">
-                              {item.type.toUpperCase()}
-                            </span>
-                          </div>
-                          <p className="max-w-xl truncate text-gray-800">
-                            {item.prompt || item.generatedText || 'Scheduled content'}
-                          </p>
-                        </div>
-
-                        <div className="flex items-center justify-end gap-1 text-[11px] text-gray-500 flex-shrink-0">
-                          {item.scheduledAt && (
-                            <div className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2 py-0.5 whitespace-nowrap">
-                              <Clock className="w-3 h-3" />
-                              <span>
-                                {new Date(item.scheduledAt).toLocaleTimeString([], {
-                                  hour: '2-digit',
-                                  minute: '2-digit',
-                                })}
+                    <div className="space-y-2">
+                      {groupedByDate[dateKey].map((item) => (
+                        <div
+                          key={item.id}
+                          className="flex items-center justify-between rounded-lg border bg-white px-4 py-3 text-xs gap-4"
+                        >
+                          <div className="space-y-1 flex-1 min-w-0">
+                            <div className="flex flex-wrap items-center gap-2">
+                              {item.platform && (
+                                <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-medium text-gray-700">
+                                  {getPlatformIcon(item.platform)}
+                                  <span>{item.platform}</span>
+                                </span>
+                              )}
+                              <span className="rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-medium text-blue-700">
+                                {item.type.toUpperCase()}
                               </span>
                             </div>
-                          )}
+                            <p className="max-w-xl truncate text-gray-800">
+                              {item.prompt || item.generatedText || 'Scheduled content'}
+                            </p>
+                          </div>
+
+                          <div className="flex items-center justify-end gap-1 text-[11px] text-gray-500 flex-shrink-0">
+                            {item.scheduledAt && (
+                              <div className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2 py-0.5 whitespace-nowrap">
+                                <Clock className="w-3 h-3" />
+                                <span>
+                                  {new Date(item.scheduledAt).toLocaleTimeString([], {
+                                    hour: '2-digit',
+                                    minute: '2-digit',
+                                  })}
+                                </span>
+                              </div>
+                            )}
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      ))}
+                    </div>
                   </div>
-                </div>
-              ))}
+                ))}
               </div>
             )}
           </CardContent>

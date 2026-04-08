@@ -15,6 +15,8 @@ apiClient.interceptors.request.use(
   (config) => {
     if (typeof window !== 'undefined') {
       const token = localStorage.getItem('token');
+      console.log('API Request:', config.method?.toUpperCase(), config.url);
+      console.log('Token exists:', !!token);
       if (token) {
         config.headers.Authorization = `Bearer ${token}`;
       }
@@ -30,20 +32,11 @@ apiClient.interceptors.request.use(
 apiClient.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response?.status === 401 && typeof window !== 'undefined') {
-      const requestUrl: string = String(error.config?.url || '');
-      const isAuthEndpoint =
-        requestUrl.includes('/auth/login') ||
-        requestUrl.includes('/auth/register') ||
-        requestUrl.includes('/auth/forgot-password') ||
-        requestUrl.includes('/auth/reset-password');
-
-      if (!isAuthEndpoint) {
+    if (error.response?.status === 401) {
+      if (typeof window !== 'undefined') {
         localStorage.removeItem('token');
         localStorage.removeItem('user');
-        if (window.location.pathname !== '/login') {
-          window.location.href = '/login';
-        }
+        window.location.href = '/login';
       }
     }
     return Promise.reject(error);

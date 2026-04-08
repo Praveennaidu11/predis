@@ -6,4 +6,3 @@ export * from './analytics.entity';
 export * from './admin-settings.entity';
 export * from './transaction.entity';
 export * from './payment.entity';
-export * from './video.entity';

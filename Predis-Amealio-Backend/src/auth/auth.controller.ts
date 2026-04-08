@@ -3,26 +3,6 @@ import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { JwtAuthGuard } from './jwt-auth.guard';
-import { IsEmail, IsString, Matches, MinLength } from 'class-validator';
-
-class ForgotPasswordDto {
-  @IsEmail()
-  email: string;
-}
-
-class ResetPasswordDto {
-  @IsEmail()
-  email: string;
-
-  @IsString()
-  otp: string;
-
-  @IsString()
-  @MinLength(8)
-  @Matches(/\d/)
-  @Matches(/[^A-Za-z0-9]/)
-  password: string;
-}
 
 @Controller('auth')
 export class AuthController {
@@ -40,16 +20,11 @@ export class AuthController {
     return this.authService.login(dto);
   }
 
-  @Post('forgot-password')
-  async forgotPassword(@Body() dto: ForgotPasswordDto) {
-    return this.authService.requestPasswordReset(dto.email);
-  }
+  // -------------------------------------
+  // OTP ENDPOINTS REMOVED / COMMENTED OUT
+  // -------------------------------------
 
-  @Post('reset-password')
-  async resetPassword(@Body() dto: ResetPasswordDto) {
-    return this.authService.resetPassword(dto.email, dto.otp, dto.password);
-  }
-
+  /*
   @Post('verify-email-otp')
   async verifyEmailOtp(@Body() body: { email: string; otp: string }) {
     return this.authService.verifyEmailOtp(body.email, body.otp);
@@ -59,6 +34,7 @@ export class AuthController {
   async resendEmailOtp(@Body() body: { email: string }) {
     return this.authService.resendEmailOtp(body.email);
   }
+  */
 
   /** GET LOGGED-IN USER PROFILE */
   @Get('me')

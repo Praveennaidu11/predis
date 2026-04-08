@@ -8,13 +8,13 @@ const DEV_CONFIG ={
 }
 
 const STAGE_CONFIG ={
-    NEXT_PUBLIC_BACKEND_URL: 'http://localhost:4000',
+    NEXT_PUBLIC_BACKEND_URL: 'http://localhost:8001',
     NEXT_PUBLIC_INSTAGRAM_CLIENT_ID:2419028528512787,
     NEXT_PUBLIC_REDIRECT_URI:"http://localhost:5000/oauth/callback"
 }
 
 const PRODUCTION_CONFIG ={
-    NEXT_PUBLIC_BACKEND_URL: 'http://localhost:4000',
+    NEXT_PUBLIC_BACKEND_URL: 'http://localhost:8001',
     NEXT_PUBLIC_INSTAGRAM_CLIENT_ID:2419028528512787,
     NEXT_PUBLIC_REDIRECT_URI:"http://localhost:5000/oauth/callback"
 }
