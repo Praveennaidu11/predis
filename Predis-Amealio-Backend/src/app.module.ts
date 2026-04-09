@@ -26,7 +26,10 @@ import * as entities from './common/entities';
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
-      useFactory: (configService: ConfigService) => ({
+      useFactory: (configService: ConfigService) => {
+        const nodeEnv = String(configService.get('NODE_ENV') || '').toLowerCase();
+        const isDev = nodeEnv === 'development';
+        return {
         type: 'postgres',
         host: configService.get('DB_HOST', 'localhost'),
         port: configService.get('DB_PORT', 5432),
@@ -34,14 +37,16 @@ import * as entities from './common/entities';
         password: configService.get('DB_PASSWORD', 'postgres'),
         database: configService.get('DB_NAME', 'postgres'),
         entities: Object.values(entities),
-        synchronize: configService.get('NODE_ENV') === 'development',
+        // IMPORTANT: Never auto-sync schema outside local development.
+        synchronize: isDev,
         logging: configService.get('NODE_ENV') === 'development',
         ssl:
           configService.get('DB_SSL') === 'true' ||
           configService.get('DB_HOST', '').includes('amazonaws.com')
             ? { rejectUnauthorized: false }
             : undefined,
-      }),
+        };
+      },
     }),
     AuthModule,
     UserModule,
