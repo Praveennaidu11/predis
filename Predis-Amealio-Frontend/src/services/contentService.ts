@@ -9,10 +9,11 @@ export interface Content {
   generatedText?: string;
   generatedImage?: string;
   generatedVideo?: string;
-  status: 'draft' | 'scheduled' | 'published';
+  status: 'draft' | 'scheduled' | 'published' | 'publishing' | 'failed';
   platform?: string;
   scheduledAt?: string;
   publishedAt?: string;
+  tags?: string[];
   metadata?: any;
   createdAt: string;
   updatedAt: string;
@@ -30,13 +31,14 @@ export interface DashboardStats {
 }
 
 class ContentService {
-  // Get all content for the library
-  async getContent(filter?: string): Promise<Content[]> {
+  // Get paginated content list
+  async getContent(filter?: string, page = 1, limit = 20): Promise<Content[]> {
     try {
-      const response = await apiClient.get('/merchant/content/list', {
-        params: filter ? { filter } : {},
-      });
-      return response.data;
+      const params: Record<string, unknown> = { page, limit };
+      if (filter && filter !== 'all') params.filter = filter;
+      const response = await apiClient.get('/merchant/content', { params });
+      // API now returns { data, total, page, limit, totalPages }
+      return response.data.data ?? [];
     } catch (error) {
       console.error('Error fetching content:', error);
       throw error;
@@ -130,28 +132,24 @@ class ContentService {
   // Helper method to get status display name
   getStatusDisplayName(status: string): string {
     switch (status?.toLowerCase()) {
-      case 'draft':
-        return 'Drafted';
-      case 'scheduled':
-        return 'Scheduled';
-      case 'published':
-        return 'Published';
-      default:
-        return status || 'Unknown';
+      case 'draft':      return 'Drafted';
+      case 'scheduled':  return 'Scheduled';
+      case 'published':  return 'Published';
+      case 'publishing': return 'Publishing…';
+      case 'failed':     return 'Failed';
+      default:           return status || 'Unknown';
     }
   }
 
   // Helper method to get status color
   getStatusColor(status: string): string {
     switch (status?.toLowerCase()) {
-      case 'draft':
-        return 'text-gray-500';
-      case 'scheduled':
-        return 'text-blue-500';
-      case 'published':
-        return 'text-green-500';
-      default:
-        return 'text-gray-500';
+      case 'draft':      return 'text-gray-500';
+      case 'scheduled':  return 'text-blue-500';
+      case 'published':  return 'text-green-500';
+      case 'publishing': return 'text-yellow-500';
+      case 'failed':     return 'text-red-500';
+      default:           return 'text-gray-500';
     }
   }
 }

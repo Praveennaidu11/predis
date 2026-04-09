@@ -1,16 +1,19 @@
-import { IsArray, IsEnum, IsObject, IsOptional, IsString } from 'class-validator';
+import { Type } from 'class-transformer';
+import {
+  IsArray,
+  IsBoolean,
+  IsInt,
+  IsObject,
+  IsOptional,
+  IsString,
+  Max,
+  Min,
+} from 'class-validator';
 
-export class SaveContentDto {
-  // prompt is optional — image/video content may be saved without a text prompt
+export class UpdateContentDto {
   @IsOptional()
   @IsString()
   prompt?: string;
-
-  @IsEnum(['text', 'image', 'video'])
-  type: string;
-
-  @IsString()
-  platform: string;
 
   @IsOptional()
   @IsString()
@@ -26,7 +29,7 @@ export class SaveContentDto {
 
   @IsOptional()
   @IsString()
-  model?: string;
+  platform?: string;
 
   @IsOptional()
   @IsString()
@@ -44,4 +47,19 @@ export class SaveContentDto {
   @IsOptional()
   @IsObject()
   metadata?: Record<string, any>;
+
+  @IsOptional()
+  @IsString()
+  sourceContentId?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(9999)
+  version?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  createVersion?: boolean;
 }

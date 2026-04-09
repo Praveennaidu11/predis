@@ -6,21 +6,13 @@ import * as path from 'path';
 config({ path: path.join(__dirname, '../../.env') });
 
 async function testDatabaseConnection() {
-  const dbHost = process.env.DB_HOST || 'localhost';
-  const sslEnabled =
-    String(process.env.DB_SSL || 'false').toLowerCase() === 'true' ||
-    dbHost.includes('amazonaws.com');
-  const sslRejectUnauthorized =
-    String(process.env.DB_SSL_REJECT_UNAUTHORIZED || 'false').toLowerCase() === 'true';
-
   const dataSource = new DataSource({
     type: 'postgres',
-    host: dbHost,
+    host: process.env.DB_HOST || 'localhost',
     port: parseInt(process.env.DB_PORT || '5432'),
     username: process.env.DB_USERNAME || 'postgres',
     password: process.env.DB_PASSWORD || 'postgres',
     database: process.env.DB_NAME || 'amealio_db',
-    ssl: sslEnabled ? { rejectUnauthorized: sslRejectUnauthorized } : undefined,
   });
 
   try {
@@ -58,10 +50,7 @@ async function testDatabaseConnection() {
     process.exit(0);
   } catch (error: any) {
     console.error('❌ Database connection failed!');
-    console.error('Error:', error?.message || String(error));
-    if (error?.code) {
-      console.error('Code:', error.code);
-    }
+    console.error('Error:', error.message);
     
     if (error.code === 'ECONNREFUSED') {
       console.error('\n💡 Possible issues:');
@@ -83,3 +72,4 @@ async function testDatabaseConnection() {
 }
 
 testDatabaseConnection();
+

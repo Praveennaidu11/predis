@@ -1,4 +1,5 @@
-import { IsString, IsOptional, IsEnum } from 'class-validator';
+import { Type } from 'class-transformer';
+import { IsBoolean, IsEnum, IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
 
 export class GenerateContentDto {
   @IsString()
@@ -28,19 +29,35 @@ export class GenerateContentDto {
 
   // Optional image-related options
   @IsOptional()
+  @IsString()
   aspectRatio?: string;
 
   @IsOptional()
+  @IsBoolean()
   textOverlay?: boolean;
 
   @IsOptional()
+  @IsString()
   overlayText?: string;
+
+  @IsOptional()
+  @IsString()
+  style?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(4)
+  variations?: number;
 
   // Optional video-related options
   @IsOptional()
+  @IsString()
   videoType?: string;
 
   @IsOptional()
+  @IsString()
   duration?: string;
 
   @IsOptional()

@@ -32,10 +32,22 @@ export class AIService {
   private readonly hfToken: string;
   private readonly hfDefaultTextModel: string;
   private readonly hfDefaultImageModel: string;
+  private readonly imageApiAuthToken: string | null;
+  private readonly imageApiRequireAuth: boolean;
+  private readonly imageApiTimeoutMs: number;
+  private readonly imageApiMaxRetries: number;
+
+  // Multi-model image generation
+  private readonly openaiApiKey: string;
+  private readonly openaiImageModel: string;
+  private readonly googleApiKey: string;
+  private readonly geminiApiKey: string;
+  private readonly geminiImageModel: string;
 
   constructor(private configService: ConfigService) {
-    this.ollamaBaseUrl = this.configService.get('OLLAMA_BASE_URL') || 'http://localhost:11434';
-    this.ollamaModel = this.configService.get('OLLAMA_MODEL') || 'phi3:mini';
+    this.ollamaBaseUrl =
+      this.configService.get("OLLAMA_BASE_URL") || "http://localhost:11434";
+    this.ollamaModel = this.configService.get("OLLAMA_MODEL") || "phi3:mini";
 
     this.imageApiBaseUrl = this.configService.get('IMAGE_API_BASE_URL') || 'http://54.88.119.163:7860';
     this.videoApiUrl =
@@ -65,7 +77,8 @@ export class AIService {
 
     this.hfToken = this.configService.get<string>('HUGGINGFACE_API_TOKEN')!;
     this.hfDefaultTextModel =
-      this.configService.get<string>('HF_TEXT_MODEL') || 'HuggingFaceH4/zephyr-7b-beta';
+      this.configService.get<string>("HF_TEXT_MODEL") ||
+      "HuggingFaceH4/zephyr-7b-beta";
     this.hfDefaultImageModel =
       this.configService.get<string>('HF_IMAGE_MODEL') || 'stabilityai/sdxl-turbo';
 
@@ -209,7 +222,7 @@ export class AIService {
   async generateText(
     prompt: string,
     model?: string,
-    maxTokens: number = 500
+    maxTokens: number = 500,
   ): Promise<string> {
     // Provider routing: if caller requests GPT, try OpenAI.
     if (model === 'gpt') {
@@ -263,7 +276,7 @@ export class AIService {
           model: modelId,
           messages: [
             {
-              role: 'user',
+              role: "user",
               content: prompt,
             },
           ],
@@ -275,7 +288,7 @@ export class AIService {
         },
         {
           timeout: 120000,
-        }
+        },
       );
 
       const data = response.data;
@@ -284,25 +297,122 @@ export class AIService {
       const text =
         data?.message?.content ||
         (Array.isArray(data?.choices) && data.choices[0]?.message?.content) ||
-        (typeof data === 'string' ? data : null);
+        (typeof data === "string" ? data : null);
 
       if (!text?.trim()) {
-        throw new Error('Empty response from local LLaMA text generation');
+        throw new Error("Empty response from local LLaMA text generation");
       }
 
       return text.trim();
     } catch (error: any) {
-      this.logger.error('Local LLaMA text generation error', error.response?.data || error.message);
+      this.logger.error(
+        "Local LLaMA text generation error",
+        error.response?.data || error.message,
+      );
       throw new HttpException(
-        `Failed to generate text content: ${
-          error.response?.data?.error ||
-          error.response?.data?.message ||
-          error.message ||
-          'Unknown error'
+        `Failed to generate text content: ${error.response?.data?.error ||
+        error.response?.data?.message ||
+        error.message ||
+        "Unknown error"
         }`,
-        error.response?.status || HttpStatus.INTERNAL_SERVER_ERROR
+        error.response?.status || HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
+  }
+
+  private async generateTextWithGemini(prompt: string, maxTokens: number, retryCount = 0): Promise<string> {
+    if (!this.googleApiKey) {
+      throw new Error('GOOGLE_API_KEY is not configured');
+    }
+
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${this.geminiModel}:generateContent?key=${this.googleApiKey}`;
+
+    const body: any = {
+      contents: [
+        {
+          parts: [{ text: prompt }],
+        },
+      ],
+      generationConfig: {
+        temperature: 0.7,
+        maxOutputTokens: Math.min(Math.max(maxTokens, 64), 2048),
+      },
+      safetySettings: [
+        { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' },
+        { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' },
+        { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' },
+        { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' },
+      ],
+    };
+
+    try {
+      const res = await axios.post(url, body, { timeout: 60000 });
+      
+      // Check if response was blocked by safety filters
+      if (res.data?.candidates?.[0]?.finishReason === 'SAFETY') {
+        throw new Error('Gemini blocked the response due to safety filters. Try a different prompt.');
+      }
+
+      const text = res.data?.candidates?.[0]?.content?.parts?.[0]?.text;
+
+      if (!text || typeof text !== 'string') {
+        throw new Error('Empty response from Gemini');
+      }
+      return text.trim();
+    } catch (error: any) {
+      const status = error.response?.status;
+
+      // Retry logic for transient errors (503 Service Unavailable, 429 Rate Limit)
+      if ((status === 503 || status === 429) && retryCount < 2) {
+        this.logger.warn(`Gemini API returned ${status}. Retrying in 2 seconds... (Attempt ${retryCount + 1})`);
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        return this.generateTextWithGemini(prompt, maxTokens, retryCount + 1);
+      }
+
+      if (status === 404) {
+        // Try v1 if v1beta fails with 404
+        const v1Url = `https://generativelanguage.googleapis.com/v1/models/${this.geminiModel}:generateContent?key=${this.googleApiKey}`;
+        const v1Res = await axios.post(v1Url, body, { timeout: 60000 });
+        const v1Text = v1Res.data?.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (v1Text) return v1Text.trim();
+      }
+      throw error;
+    }
+  }
+
+  private async generateTextWithGPT(prompt: string, maxTokens: number): Promise<string> {
+    if (!this.openaiApiKey) {
+      throw new Error('OPENAI_API_KEY is not configured');
+    }
+
+    const url = 'https://api.openai.com/v1/chat/completions';
+
+    const body = {
+      model: this.gptModel,
+      messages: [
+        {
+          role: 'user',
+          content: prompt,
+        },
+      ],
+      max_tokens: maxTokens,
+      temperature: 0.7,
+    };
+
+    const res = await axios.post(url, body, {
+      headers: {
+        Authorization: `Bearer ${this.openaiApiKey}`,
+        'Content-Type': 'application/json',
+      },
+      timeout: 60000,
+    });
+
+    const text = res.data?.choices?.[0]?.message?.content;
+
+    if (!text || typeof text !== 'string') {
+      throw new Error('Empty response from GPT');
+    }
+    return text.trim();
   }
 
   private async generateTextWithGemini(prompt: string, maxTokens: number, retryCount = 0): Promise<string> {
@@ -465,9 +575,18 @@ export class AIService {
         throw new Error('No image returned from image generation API');
       }
 
-      return imageUrl;
+      return images.slice(0, variations);
     } catch (error: any) {
-      this.logger.error('Image generation error', error.response?.data || error.message);
+      this.logger.error(
+        "Text-to-image generation error",
+        error.response?.data || error.message,
+      );
+      const message =
+        error.response?.data?.error ||
+        error.response?.data?.message ||
+        error.message ||
+        "Failed to generate image";
+
       throw new HttpException(
         `Failed to generate image: ${error.message}`,
         HttpStatus.INTERNAL_SERVER_ERROR
@@ -586,9 +705,12 @@ export class AIService {
   }
 
   /* ----------------------------------------------------------
-      VIDEO GENERATION (External text-to-video API)
+      GPT IMAGE GENERATION (OpenAI Images API)
+      Model is read from OPENAI_IMAGE_MODEL env var.
+      Default: dall-e-2 (works on any billing-enabled account).
+      Override to dall-e-3 for higher quality (requires paid plan).
     ---------------------------------------------------------- */
-  async generateTextToVideo(
+  private async generateImagesWithGPT(
     prompt: string,
     options: {
       durationSeconds?: number;
@@ -752,50 +874,55 @@ export class AIService {
     }
   }
 
-  async generateSocialContent(
+  /* ----------------------------------------------------------
+      SOCIAL MEDIA POST GENERATION (uses HF text)
+    ---------------------------------------------------------- */
+  async generateSocialMediaPost(
     topic: string,
     platform: string,
-    tone: string = 'professional',
+    tone: string = "professional",
     model?: string,
-    outputType: 'caption' | 'hashtags' | 'summary' | 'generic' = 'generic'
+    outputType: "caption" | "hashtags" | "summary" | "generic" = "generic",
   ): Promise<string> {
     const platformGuidelines = {
-      instagram: 'Keep it visual and engaging with emojis. Max 2200 characters. Include hashtags.',
-      facebook: 'Conversational and community-focused.',
-      linkedin: 'Professional and value-driven.',
-      twitter: 'Concise & impactful. Max 280 characters.',
-      tiktok: 'Fun, trendy, with a CTA.',
+      instagram:
+        "Keep it visual and engaging with emojis. Max 2200 characters. Include hashtags.",
+      facebook: "Conversational and community-focused.",
+      linkedin: "Professional and value-driven.",
+      twitter: "Concise & impactful. Max 280 characters.",
+      tiktok: "Fun, trendy, with a CTA.",
     };
 
     const guidelines =
-      platformGuidelines[platform.toLowerCase()] || 'Create engaging content';
+      platformGuidelines[platform.toLowerCase()] || "Create engaging content";
 
     let outputInstructions: string;
 
     switch (outputType) {
-      case 'caption':
+      case "caption":
         outputInstructions = [
-          'Generate ONLY 3-5 short Instagram-style captions.',
-          'Return one caption per line.',
-          'Do not include any extra text, labels, or explanations.',
-        ].join(' ');
+          "Generate ONLY 3-5 short Instagram-style captions.",
+          "Return one caption per line.",
+          "Do not include any extra text, labels, or explanations.",
+        ].join(" ");
         break;
-      case 'hashtags':
+      case "hashtags":
         outputInstructions = [
-          'Generate ONLY hashtags relevant to the topic.',
-          'Return them on a single line separated by spaces.',
-          'Do not include any other words, sentences, or explanations.',
-        ].join(' ');
+          "Generate ONLY hashtags relevant to the topic.",
+          "Return them on a single line separated by spaces.",
+          "Do not include any other words, sentences, or explanations.",
+        ].join(" ");
         break;
-      case 'summary':
+      case "summary":
         outputInstructions = [
-          'Provide ONLY a concise summary suitable for this platform.',
+          "Provide ONLY a concise summary suitable for this platform.",
           "Do not add any preamble such as 'Here is the summary'.",
-        ].join(' ');
+        ].join(" ");
         break;
-      case 'generic':
+      case "generic":
       default:
-        outputInstructions = 'Write a complete social media post following the guidelines above.';
+        outputInstructions =
+          "Write a complete social media post following the guidelines above.";
         break;
     }
 

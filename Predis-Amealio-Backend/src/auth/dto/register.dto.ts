@@ -1,13 +1,11 @@
-import { IsEmail, IsString, Matches, MinLength, IsOptional } from 'class-validator';
+import { IsEmail, IsString, MinLength, IsOptional } from 'class-validator';
 
 export class RegisterDto {
   @IsEmail()
   email: string;
 
   @IsString()
-  @MinLength(8)
-  @Matches(/\d/)
-  @Matches(/[^A-Za-z0-9]/)
+  @MinLength(6)
   password: string;
 
   @IsString()
@@ -16,8 +14,4 @@ export class RegisterDto {
   @IsOptional()
   @IsString()
   companyName?: string;
-
-  @IsOptional()
-  @IsString()
-  role?: string;
 }

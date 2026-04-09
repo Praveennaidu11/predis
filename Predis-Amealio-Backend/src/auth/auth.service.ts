@@ -11,7 +11,6 @@ import { EmailService } from '../integrations/email/email.service';
 
 @Injectable()
 export class AuthService {
-  private readonly logger = new Logger(AuthService.name);
   constructor(
     @InjectRepository(User)
     private userRepository: Repository<User>,
@@ -29,14 +28,11 @@ export class AuthService {
    */
   async register(dto: RegisterDto) {
     const existing = await this.userRepository.findOne({
-      where: { email: dto.email, role: dto.role || 'merchant' },
+      where: { email: dto.email },
     });
 
     if (existing) {
-      throw new ConflictException({
-        message: `This email is already registered as a ${dto.role || 'merchant'}. Please login.`,
-        errorCode: 'EMAIL_ALREADY_EXISTS'
-      });
+      throw new ConflictException('Email already registered');
     }
 
     const hashedPassword = await bcrypt.hash(dto.password, 10);
@@ -46,7 +42,7 @@ export class AuthService {
       passwordHash: hashedPassword,
       fullName: dto.fullName,
       companyName: dto.companyName,
-      role: dto.role || 'merchant',
+      role: 'merchant',
       subscriptionTier: 'free',
     });
 
@@ -68,11 +64,11 @@ export class AuthService {
    */
   async login(dto: LoginDto) {
     const user = await this.userRepository.findOne({
-      where: { email: dto.email, role: dto.role || 'merchant' },
+      where: { email: dto.email },
     });
 
     if (!user) {
-      throw new UnauthorizedException(`User not found as ${dto.role || 'merchant'}. Please sign up first.`);
+      throw new UnauthorizedException('User not found. Please sign up first.');
     }
 
     if (!user.passwordHash) {
@@ -83,10 +79,6 @@ export class AuthService {
 
     if (!isPasswordValid) {
       throw new UnauthorizedException('Invalid password');
-    }
-
-    if (dto.role && user.role !== dto.role) {
-      throw new UnauthorizedException(`This account is not registered as a ${dto.role}`);
     }
 
     const token = this.generateToken(user.id, user.email, user.role);
@@ -138,7 +130,7 @@ export class AuthService {
       user: {
         id: user.id,
         email: user.email,
-        fullName: user.fullName,
+        name: user.fullName,
         role: user.role,
       },
     };

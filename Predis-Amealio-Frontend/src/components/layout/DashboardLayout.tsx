@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import Link from 'next/link';
-import { usePathname, useRouter } from 'next/navigation';
+import { usePathname } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import { 
   Home, 
@@ -27,7 +27,6 @@ interface DashboardLayoutProps {
 const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
   const { user, logout } = useAuth();
   const pathname = usePathname();
-  const router = useRouter();
   const [isCollapsed, setIsCollapsed] = useState(false);
 
   const isAdmin = user?.role === 'admin';
@@ -47,7 +46,6 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
   const adminLinks = [
     { href: '/admin/dashboard', icon: Home, label: 'Dashboard' },
     { href: '/admin/users', icon: Users, label: 'Users' },
-    { href: '/admin/content', icon: Folder, label: 'Content' },
     { href: '/admin/settings', icon: Settings, label: 'Settings' },
   ];
 
@@ -151,29 +149,20 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
                 </p>
               </div>
               <button 
-                onClick={() => {
-                  logout();
-                  router.replace('/login');
-                  // Ensure any cached authenticated UI resets
-                  router.refresh();
-                }}
-                className="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg border border-[#e5e7eb] text-[#001D51] transition-all duration-200 hover:bg-red-50 hover:border-red-200 hover:text-red-600 hover:ring-2 hover:ring-red-200/70 hover:shadow-sm hover:scale-[1.01] active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400"
+                onClick={logout}
+                className="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg border border-[#e5e7eb] hover:bg-gray-100 transition-colors duration-200"
                 style={{ fontFamily: 'Inter, sans-serif' }}
               >
-                <LogOut size={16} />
-                <span>Logout</span>
+                <LogOut size={16} className="text-[#001D51]" />
+                <span className="text-[#001D51]">Logout</span>
               </button>
             </div>
           ) : (
             <button 
-              onClick={() => {
-                logout();
-                router.replace('/login');
-                router.refresh();
-              }}
-              className="w-full flex items-center justify-center p-2 rounded-lg text-[#001D51] transition-all duration-200 hover:bg-red-50 hover:text-red-600 hover:ring-2 hover:ring-red-200/70 hover:shadow-sm hover:scale-105 active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400"
+              onClick={logout}
+              className="w-full flex items-center justify-center p-2 rounded-lg hover:bg-gray-100 transition-colors duration-200"
             >
-              <LogOut size={16} />
+              <LogOut size={16} className="text-[#001D51]" />
             </button>
           )}
         </div>

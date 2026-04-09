@@ -4,15 +4,21 @@ import {
   PrimaryGeneratedColumn,
   CreateDateColumn,
   UpdateDateColumn,
+  DeleteDateColumn,
   ManyToOne,
   OneToMany,
   JoinColumn,
+  Index,
 } from 'typeorm';
 import { User } from './user.entity';
 import { Brand } from './brand.entity';
 import { Analytics } from './analytics.entity';
 
 @Entity('content')
+@Index('IDX_content_user_id', ['userId'])
+@Index('IDX_content_user_id_status', ['userId', 'status'])
+@Index('IDX_content_scheduled_at', ['scheduledAt'])
+@Index('IDX_content_created_at', ['createdAt'])
 export class Content {
   @PrimaryGeneratedColumn('uuid')
   id: string;
@@ -32,10 +38,10 @@ export class Content {
   @Column({ name: 'generated_text', nullable: true, type: 'text' })
   generatedText: string;
 
-  @Column({ name: 'generated_image', nullable: true })
+  @Column({ name: 'generated_image', nullable: true, type: 'text' })
   generatedImage: string;
 
-  @Column({ name: 'generated_video', nullable: true })
+  @Column({ name: 'generated_video', nullable: true, type: 'text' })
   generatedVideo: string;
 
   @Column({ default: 'draft' })
@@ -50,6 +56,16 @@ export class Content {
   @Column({ name: 'published_at', nullable: true, type: 'timestamp' })
   publishedAt: Date;
 
+  @Column({ name: 'source_content_id', nullable: true })
+  sourceContentId: string;
+
+  @Column({ default: 1 })
+  version: number;
+
+  // Comma-separated tag storage (simple-array) — e.g. "promo,festival,food"
+  @Column({ type: 'simple-array', nullable: true })
+  tags: string[];
+
   @Column({ type: 'jsonb', nullable: true })
   metadata: any;
 
@@ -58,6 +74,10 @@ export class Content {
 
   @UpdateDateColumn({ name: 'updated_at' })
   updatedAt: Date;
+
+  // Soft-delete: records are flagged instead of physically removed
+  @DeleteDateColumn({ name: 'deleted_at', nullable: true })
+  deletedAt: Date;
 
   @ManyToOne(() => User, (user) => user.content, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'user_id' })

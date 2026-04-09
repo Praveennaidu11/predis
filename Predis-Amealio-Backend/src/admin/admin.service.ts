@@ -78,46 +78,6 @@ export class AdminService {
     });
   }
 
-  async getContent(filterStatus?: string, limit = 100) {
-    const where: any = {};
-    if (filterStatus && filterStatus !== 'all') {
-      where.status = filterStatus;
-    }
-
-    return this.contentRepository.find({
-      where,
-      take: limit,
-      order: { createdAt: 'DESC' },
-      relations: ['brand', 'user'],
-      select: {
-        id: true,
-        userId: true,
-        type: true,
-        prompt: true,
-        generatedText: true,
-        generatedImage: true,
-        generatedVideo: true,
-        status: true,
-        platform: true,
-        scheduledAt: true,
-        publishedAt: true,
-        createdAt: true,
-        updatedAt: true,
-        brand: {
-          id: true,
-          name: true,
-          logo: true,
-        } as any,
-        user: {
-          id: true,
-          email: true,
-          fullName: true,
-          role: true,
-        } as any,
-      } as any,
-    });
-  }
-
   async updateUserTier(userId: string, tier: string) {
     await this.userRepository.update({ id: userId }, { subscriptionTier: tier });
     return this.userRepository.findOne({ where: { id: userId } });

@@ -1,7 +1,3 @@
-'use client';
-
-export const dynamic = 'force-dynamic';
-
 export default function OfflinePage() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-indigo-500 to-purple-600 p-4">

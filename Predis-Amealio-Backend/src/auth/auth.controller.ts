@@ -47,16 +47,11 @@ export class AuthController {
     return this.authService.login(dto);
   }
 
-  @Post('forgot-password')
-  async forgotPassword(@Body() dto: ForgotPasswordDto) {
-    return this.authService.requestPasswordReset(dto.email);
-  }
+  // -------------------------------------
+  // OTP ENDPOINTS REMOVED / COMMENTED OUT
+  // -------------------------------------
 
-  @Post('reset-password')
-  async resetPassword(@Body() dto: ResetPasswordDto) {
-    return this.authService.resetPassword(dto.email, dto.otp, dto.password);
-  }
-
+  /*
   @Post('verify-email-otp')
   async verifyEmailOtp(@Body() body: { email: string; otp: string }) {
     return this.authService.verifyEmailOtp(body.email, body.otp);
@@ -66,6 +61,7 @@ export class AuthController {
   async resendEmailOtp(@Body() body: { email: string }) {
     return this.authService.resendEmailOtp(body.email);
   }
+  */
 
   /** GET LOGGED-IN USER PROFILE */
   @Get('me')

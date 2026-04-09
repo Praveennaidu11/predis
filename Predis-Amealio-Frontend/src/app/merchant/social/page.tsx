@@ -30,7 +30,7 @@ export default function SocialMediaPage() {
   const [platforms, setPlatforms] = useState<Platform[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8001';
+  const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL;
 
   useEffect(() => {
     fetchAccounts();
@@ -114,25 +114,22 @@ export default function SocialMediaPage() {
 
   const handleConnect = async (platform: Platform) => {
     try {
-      // Real OAuth redirect flow:
-      // 1) ask backend for the platform auth URL (includes state + uses redirectUri)
-      // 2) redirect the browser to that URL so the user can sign in
       const token = localStorage.getItem('token');
-      const redirectUri = `${window.location.origin}/oauth/callback`;
-      const res = await axios.get(
-        `${backendUrl}/api/social/oauth/url/${platform.id}`,
+      await axios.post(
+        `${backendUrl}/api/social/connect`,
         {
-          params: { redirectUri },
-          headers: { Authorization: `Bearer ${token}` },
+          platform: platform.id,
+          // In production, this would be created after the OAuth flow.
+          accountName: platform.name,
+          accessToken: 'demo_token_' + Date.now(), // In real app, this would come from OAuth
         },
+        {
+          headers: { Authorization: `Bearer ${token}` },
+        }
       );
 
-      const url: string | undefined = res.data?.url;
-      if (!url) {
-        throw new Error('No OAuth URL returned');
-      }
-
-      window.location.href = url;
+      toast.success(`Connected to ${platform.name} successfully!`);
+      fetchAccounts();
     } catch (error: any) {
       toast.error(error.response?.data?.message || 'Failed to connect account');
     }

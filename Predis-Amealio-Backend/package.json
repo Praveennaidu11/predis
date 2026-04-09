@@ -6,7 +6,6 @@
   "scripts": {
     "build": "nest build",
     "start": "nest start",
-    "prestart:dev": "npm run check:requirements",
     "start:dev": "nest start --watch",
     "start:prod": "node dist/main",
     "typeorm": "typeorm-ts-node-commonjs",
@@ -14,8 +13,7 @@
     "migration:run": "typeorm-ts-node-commonjs migration:run -d src/common/database/data-source.ts",
     "migration:revert": "typeorm-ts-node-commonjs migration:revert -d src/common/database/data-source.ts",
     "seed": "ts-node src/common/database/seed.ts",
-    "test:db": "ts-node src/scripts/test-db-connection.ts",
-    "check:requirements": "ts-node src/scripts/test-db-connection.ts"
+    "test:db": "ts-node src/scripts/test-db-connection.ts"
   },
   "dependencies": {
     "@nestjs/common": "^10.0.0",

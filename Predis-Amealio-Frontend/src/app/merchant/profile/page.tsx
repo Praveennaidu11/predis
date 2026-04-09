@@ -54,7 +54,7 @@ export default function MerchantProfilePage() {
     email: '',
   });
 
-  const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:4000';
+  const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8001';
 
   const oauthConfigs: OAuthConfig[] = [
     {
@@ -147,24 +147,8 @@ export default function MerchantProfilePage() {
   };
 
   const handleOAuthConnect = (config: OAuthConfig) => {
-    let clientId: string | undefined;
-
-    if (config.platform === 'instagram') {
-      clientId = process.env.NEXT_PUBLIC_INSTAGRAM_APP_ID || '2419028528512787';
-    } else if (config.platform === 'facebook') {
-      // IMPORTANT: Replace this placeholder with your actual Facebook App ID in your .env.local file
-      clientId = process.env.NEXT_PUBLIC_FACEBOOK_APP_ID || 'YOUR_FACEBOOK_APP_ID_HERE';
-    } else {
-      clientId = 'demo_client_id';
-    }
-
-    if (!clientId || clientId.includes('YOUR_FACEBOOK_APP_ID_HERE')) {
-      toast.error(`Configuration error for ${config.name}`, {
-        description: `The App ID for ${config.name} is not configured. Please add it to your environment variables.`,
-      });
-      return;
-    }
-
+    // Use Instagram App ID for testing, others use demo
+    const clientId = config.platform === 'instagram' ? '2419028528512787' : 'demo_client_id';
     const redirectUri = `${window.location.origin}/oauth/callback`;
     const state = btoa(JSON.stringify({ platform: config.platform, timestamp: Date.now() }));
     
@@ -186,9 +170,9 @@ export default function MerchantProfilePage() {
         break;
     }
 
-    // For production platforms, redirect. For others, show the URL.
-    if (config.platform === 'instagram' || config.platform === 'facebook') {
-      console.log(`Redirecting to ${config.name} OAuth:`, oauthUrl);
+    // Enable redirect for Instagram since we have real credentials
+    if (config.platform === 'instagram' && clientId !== 'demo_client_id') {
+      console.log('Redirecting to Instagram OAuth:', oauthUrl);
       window.location.href = oauthUrl;
     } else {
       // For demo purposes, show the OAuth URL
@@ -416,4 +400,3 @@ export default function MerchantProfilePage() {
     </div>
   );
 }
- 

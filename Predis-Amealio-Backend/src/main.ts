@@ -15,18 +15,9 @@ async function bootstrap() {
   // Global prefix
   app.setGlobalPrefix('api');
 
-  // Serve static files from temp directory with CORS and Range support
-  app.useStaticAssets(join(process.cwd(), 'temp'), {
-    prefix: '/temp',
-    setHeaders: (res) => {
-      res.set('Access-Control-Allow-Origin', '*');
-      res.set('Accept-Ranges', 'bytes');
-    },
-  });
-
   // Enable CORS
   app.enableCors({
-    origin: (process.env.CORS_ORIGIN || 'http://localhost:5000').split(','),
+    origin: process.env.CORS_ORIGIN?.split(',') || ['http://localhost:5000'],
     credentials: true,
   });
 

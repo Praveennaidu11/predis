@@ -1,4 +1,4 @@
-import { Controller, Get, Put, Param, Body, UseGuards, Query } from '@nestjs/common';
+import { Controller, Get, Put, Param, Body, UseGuards } from '@nestjs/common';
 import { AdminService } from './admin.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
@@ -18,15 +18,6 @@ export class AdminController {
   @Get('users')
   async getUsers() {
     return this.adminService.getUsers();
-  }
-
-  @Get('content')
-  async getContent(
-    @Query('status') status?: string,
-    @Query('limit') limit?: string,
-  ) {
-    const parsedLimit = limit ? parseInt(limit, 10) : undefined;
-    return this.adminService.getContent(status, parsedLimit || 100);
   }
 
   @Put('users/:id/tier')

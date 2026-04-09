@@ -1,123 +1,75 @@
-// import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
-// import Redis from 'ioredis';
-// import { ConfigService } from '@nestjs/config';
-
-// @Injectable()
-// export class RedisService implements OnModuleInit, OnModuleDestroy {
-//   private client: Redis | null = null;
-//   private isEnabled: boolean;
-
-//   constructor(private configService: ConfigService) {
-//     this.isEnabled = this.configService.get('REDIS_ENABLED') !== 'false';
-    
-//     if (this.isEnabled) {
-//       try {
-//         this.client = new Redis({
-//           host: this.configService.get('REDIS_HOST') || 'localhost',
-//           port: this.configService.get('REDIS_PORT') || 6379,
-//           retryStrategy: (times) => {
-//             const delay = Math.min(times * 50, 2000);
-//             return delay;
-//           },
-//         });
-//       } catch (error) {
-//         console.warn('⚠️ Failed to initialize Redis:', error.message);
-//         this.isEnabled = false;
-//       }
-//     } else {
-//       console.log('ℹ️ Redis is disabled by configuration');
-//     }
-//   }
-
-//   async onModuleInit() {
-//     if (!this.client) return;
-    
-//     this.client.on('connect', () => {
-//       console.log('✅ Redis connected');
-//     });
-
-//     this.client.on('error', (err) => {
-//       console.error('❌ Redis error:', err);
-//     });
-//   }
-
-//   async onModuleDestroy() {
-//     if (this.client) {
-//       await this.client.quit();
-//     }
-//   }
-
-//   async get(key: string): Promise<string | null> {
-//     if (!this.client) return null;
-//     try {
-//       return await this.client.get(key);
-//     } catch (error) {
-//       console.error('Redis get error:', error);
-//       return null;
-//     }
-//   }
-
-//   async set(key: string, value: string, ttl?: number): Promise<void> {
-//     if (!this.client) return;
-//     try {
-//       if (ttl) {
-//         await this.client.set(key, value, 'EX', ttl);
-//       } else {
-//         await this.client.set(key, value);
-//       }
-//     } catch (error) {
-//       console.error('Redis set error:', error);
-//     }
-//   }
-
-//   async del(key: string): Promise<number> {
-//     if (!this.client) return 0;
-//     try {
-//       return await this.client.del(key);
-//     } catch (error) {
-//       console.error('Redis del error:', error);
-//       return 0;
-//     }
-//   }
-
-//   async exists(key: string): Promise<boolean> {
-//     const result = await this.client.exists(key);
-//     return result === 1;
-//   }
-// }
-
-
-import { Injectable } from '@nestjs/common';
+import { Injectable, OnModuleInit, OnModuleDestroy, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import Redis from 'ioredis';
 
 @Injectable()
-export class RedisService {
-  private isEnabled = false;
+export class RedisService implements OnModuleInit, OnModuleDestroy {
+  private client: Redis | null = null;
+  private readonly logger = new Logger(RedisService.name);
 
-  constructor() {
-    console.log('ℹ️ Using Mock Redis Service - Redis is disabled');
+  constructor(private configService: ConfigService) {
+    const enabled = this.configService.get<string>('REDIS_ENABLED') !== 'false';
+
+    if (enabled) {
+      this.client = new Redis({
+        host: this.configService.get<string>('REDIS_HOST') || 'localhost',
+        port: +(this.configService.get<string>('REDIS_PORT') || '6379'),
+        lazyConnect: true,
+        retryStrategy: (times) => {
+          // Give up after 3 retries to avoid blocking the server startup
+          if (times > 3) return null;
+          return Math.min(times * 300, 2000);
+        },
+      });
+
+      this.client.on('connect', () => this.logger.log('Redis connected'));
+      this.client.on('error', (err) =>
+        this.logger.warn(`Redis unavailable — caching disabled: ${err.message}`),
+      );
+    } else {
+      this.logger.log('Redis disabled via REDIS_ENABLED=false — running without cache');
+    }
   }
 
   async onModuleInit() {
-    // No-op
+    if (this.client) {
+      await this.client.connect().catch(() => {
+        // Swallow connection error — service falls back to DB-only mode
+      });
+    }
   }
 
   async onModuleDestroy() {
-    // No-op
+    if (this.client) {
+      await this.client.quit().catch(() => {});
+    }
   }
 
   async get(key: string): Promise<string | null> {
-    return null;
+    if (!this.client) return null;
+    return this.client.get(key).catch(() => null);
   }
 
   async set(key: string, value: string, ttl?: number): Promise<void> {
-    // No-op
+    if (!this.client) return;
+    try {
+      if (ttl) {
+        await this.client.set(key, value, 'EX', ttl);
+      } else {
+        await this.client.set(key, value);
+      }
+    } catch {
+      // Cache write failure is non-fatal
+    }
   }
 
   async del(key: string): Promise<number> {
-    return 0;
+    if (!this.client) return 0;
+    return this.client.del(key).catch(() => 0);
   }
 
   async exists(key: string): Promise<boolean> {
-    return false;
+    if (!this.client) return false;
+    return this.client.exists(key).then((r) => r === 1).catch(() => false);
   }
 }
