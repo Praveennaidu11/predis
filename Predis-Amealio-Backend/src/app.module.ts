@@ -8,9 +8,11 @@ import { AnalyticsModule } from './analytics/analytics.module';
 import { AdminModule } from './admin/admin.module';
 import { PaymentModule } from './payment/payment.module';
 import { SocialModule } from './social/social.module';
+import { VideoModule } from './video/video.module';
 import { AIModule } from './integrations/ai/ai.module';
 import { EmailModule } from './integrations/email/email.module';
 import { RazorpayModule } from './integrations/razorpay/razorpay.module';
+import { BrandModule } from './brand/brand.module';
 import { DatabaseService } from './common/database/database.service';
 import { RedisService } from './common/redis.service';
 import * as entities from './common/entities';
@@ -42,7 +44,10 @@ const validateEnv = (env: Record<string, any>) => {
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
-      useFactory: (configService: ConfigService) => ({
+      useFactory: (configService: ConfigService) => {
+        const nodeEnv = String(configService.get('NODE_ENV') || '').toLowerCase();
+        const isDev = nodeEnv === 'development';
+        return {
         type: 'postgres',
         host: configService.get('DB_HOST', 'localhost'),
         port: configService.get('DB_PORT', 5432),
@@ -50,9 +55,16 @@ const validateEnv = (env: Record<string, any>) => {
         password: configService.get('DB_PASSWORD', 'postgres'),
         database: configService.get('DB_NAME', 'amealio_db'),
         entities: Object.values(entities),
-        synchronize: configService.get('NODE_ENV') === 'development',
+        // IMPORTANT: Never auto-sync schema outside local development.
+        synchronize: isDev,
         logging: configService.get('NODE_ENV') === 'development',
-      }),
+        ssl:
+          configService.get('DB_SSL') === 'true' ||
+          configService.get('DB_HOST', '').includes('amazonaws.com')
+            ? { rejectUnauthorized: false }
+            : undefined,
+        };
+      },
     }),
     AuthModule,
     UserModule,
@@ -61,6 +73,8 @@ const validateEnv = (env: Record<string, any>) => {
     AdminModule,
     PaymentModule,
     SocialModule,
+    VideoModule,
+    BrandModule,
     AIModule,
     EmailModule,
     RazorpayModule,

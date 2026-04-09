@@ -11,6 +11,7 @@ import { EmailService } from '../integrations/email/email.service';
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
   constructor(
     @InjectRepository(User)
     private userRepository: Repository<User>,

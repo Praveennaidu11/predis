@@ -37,13 +37,6 @@ export class AIService {
   private readonly imageApiTimeoutMs: number;
   private readonly imageApiMaxRetries: number;
 
-  // Multi-model image generation
-  private readonly openaiApiKey: string;
-  private readonly openaiImageModel: string;
-  private readonly googleApiKey: string;
-  private readonly geminiApiKey: string;
-  private readonly geminiImageModel: string;
-
   constructor(private configService: ConfigService) {
     this.ollamaBaseUrl =
       this.configService.get("OLLAMA_BASE_URL") || "http://localhost:11434";
@@ -67,7 +60,7 @@ export class AIService {
     }
     this.backendBaseUrl = this.configService.get('BACKEND_URL') || 'http://localhost:8001';
 
-    this.openaiApiKey = this.configService.get<string>('OPENAI_API_KEY');
+    this.openaiApiKey = this.configService.get<string>('OPENAI_API_KEY')?.trim();
     this.gptModel = this.configService.get<string>('GPT_MODEL') || 'gpt-4o-mini';
 
     this.googleApiKey =
@@ -234,12 +227,48 @@ export class AIService {
           error?.response?.data?.message ||
           error?.message ||
           'Unknown error';
+        const status = error?.response?.status;
+        const quotaLike =
+          status === 429 ||
+          /quota|billing|insufficient|usage limit/i.test(String(errorMsg));
+
+        if (quotaLike && this.googleApiKey) {
+          this.logger.warn(
+            `GPT unavailable (${status ?? 'n/a'}): ${errorMsg}. Falling back to Gemini.`,
+          );
+          try {
+            return await this.generateTextWithGemini(prompt, maxTokens);
+          } catch (geminiErr: any) {
+            const geminiMsg =
+              geminiErr?.response?.data?.error?.message ||
+              geminiErr?.response?.data?.message ||
+              geminiErr?.message ||
+              'Unknown error';
+            this.logger.warn(`Gemini fallback after GPT failure also failed: ${geminiMsg}`);
+            
+            // Map upstream auth failures away from 401/403 to prevent UI logout
+            const safeStatus = (status === 401 || status === 403) 
+              ? HttpStatus.BAD_GATEWAY 
+              : (status || HttpStatus.INTERNAL_SERVER_ERROR);
+
+            throw new HttpException(
+              `GPT generation failed: ${errorMsg}`,
+              safeStatus,
+            );
+          }
+        }
 
         this.logger.warn(`GPT text generation failed: ${errorMsg}`);
 
+        // Never return 401/403 to the frontend from an upstream provider,
+        // as it triggers automatic logout in the UI.
+        const safeStatus = (status === 401 || status === 403) 
+          ? HttpStatus.BAD_GATEWAY 
+          : (status || HttpStatus.INTERNAL_SERVER_ERROR);
+
         throw new HttpException(
           `GPT generation failed: ${errorMsg}`,
-          error?.response?.status || HttpStatus.INTERNAL_SERVER_ERROR,
+          safeStatus,
         );
       }
     }
@@ -257,11 +286,16 @@ export class AIService {
 
         this.logger.warn(`Gemini text generation failed: ${errorMsg}`);
 
+        const status = error?.response?.status;
+        const safeStatus = (status === 401 || status === 403)
+          ? HttpStatus.BAD_GATEWAY
+          : (status || HttpStatus.INTERNAL_SERVER_ERROR);
+
         // If Gemini was explicitly requested, we don't fall back to local Ollama
         // because Ollama is likely not configured or running on the same machine.
         throw new HttpException(
           `Gemini generation failed: ${errorMsg}`,
-          error?.response?.status || HttpStatus.INTERNAL_SERVER_ERROR,
+          safeStatus,
         );
       }
     }
@@ -320,9 +354,11 @@ export class AIService {
     }
   }
 
+  // NOTE: duplicate Gemini/GPT helper implementations were removed during merge resolution.
+
   private async generateTextWithGemini(prompt: string, maxTokens: number, retryCount = 0): Promise<string> {
-    if (!this.googleApiKey) {
-      throw new Error('GOOGLE_API_KEY is not configured');
+    if (!this.googleApiKey || this.googleApiKey === 'your_google_api_key') {
+      throw new Error('GOOGLE_API_KEY is not configured or has default value');
     }
 
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${this.geminiModel}:generateContent?key=${this.googleApiKey}`;
@@ -354,6 +390,11 @@ export class AIService {
       }
 
       const text = res.data?.candidates?.[0]?.content?.parts?.[0]?.text;
+      const usage = res.data?.usageMetadata;
+
+      if (usage) {
+        this.logger.log(`Gemini Usage: ${usage.promptTokenCount} prompt, ${usage.candidatesTokenCount} completion, ${usage.totalTokenCount} total tokens`);
+      }
 
       if (!text || typeof text !== 'string') {
         throw new Error('Empty response from Gemini');
@@ -380,9 +421,9 @@ export class AIService {
     }
   }
 
-  private async generateTextWithGPT(prompt: string, maxTokens: number): Promise<string> {
-    if (!this.openaiApiKey) {
-      throw new Error('OPENAI_API_KEY is not configured');
+  private async generateTextWithGPT(prompt: string, maxTokens: number, retryCount = 0): Promise<string> {
+    if (!this.openaiApiKey || this.openaiApiKey === 'your_openai_api_key') {
+      throw new Error('OPENAI_API_KEY is not configured or has default value');
     }
 
     const url = 'https://api.openai.com/v1/chat/completions';
@@ -397,117 +438,45 @@ export class AIService {
       ],
       max_tokens: maxTokens,
       temperature: 0.7,
-    };
-
-    const res = await axios.post(url, body, {
-      headers: {
-        Authorization: `Bearer ${this.openaiApiKey}`,
-        'Content-Type': 'application/json',
-      },
-      timeout: 60000,
-    });
-
-    const text = res.data?.choices?.[0]?.message?.content;
-
-    if (!text || typeof text !== 'string') {
-      throw new Error('Empty response from GPT');
-    }
-    return text.trim();
-  }
-
-  private async generateTextWithGemini(prompt: string, maxTokens: number, retryCount = 0): Promise<string> {
-    if (!this.googleApiKey) {
-      throw new Error('GOOGLE_API_KEY is not configured');
-    }
-
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${this.geminiModel}:generateContent?key=${this.googleApiKey}`;
-
-    const body: any = {
-      contents: [
-        {
-          parts: [{ text: prompt }],
-        },
-      ],
-      generationConfig: {
-        temperature: 0.7,
-        maxOutputTokens: Math.min(Math.max(maxTokens, 64), 2048),
-      },
-      safetySettings: [
-        { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' },
-        { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' },
-        { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' },
-        { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' },
-      ],
     };
 
     try {
-      const res = await axios.post(url, body, { timeout: 60000 });
-      
-      // Check if response was blocked by safety filters
-      if (res.data?.candidates?.[0]?.finishReason === 'SAFETY') {
-        throw new Error('Gemini blocked the response due to safety filters. Try a different prompt.');
+      const res = await axios.post(url, body, {
+        headers: {
+          Authorization: `Bearer ${this.openaiApiKey}`,
+          'Content-Type': 'application/json',
+        },
+        timeout: 60000,
+      });
+
+      const text = res.data?.choices?.[0]?.message?.content;
+      const usage = res.data?.usage;
+
+      if (usage) {
+        this.logger.log(`GPT Usage: ${usage.prompt_tokens} prompt, ${usage.completion_tokens} completion, ${usage.total_tokens} total tokens`);
       }
 
-      const text = res.data?.candidates?.[0]?.content?.parts?.[0]?.text;
-
       if (!text || typeof text !== 'string') {
-        throw new Error('Empty response from Gemini');
+        throw new Error('Empty response from GPT');
       }
       return text.trim();
     } catch (error: any) {
       const status = error.response?.status;
+      const errorData = error.response?.data?.error;
+      const errorMsg = errorData?.message || error.message || String(error);
 
-      // Retry logic for transient errors (503 Service Unavailable, 429 Rate Limit)
-      if ((status === 503 || status === 429) && retryCount < 2) {
-        this.logger.warn(`Gemini API returned ${status}. Retrying in 2 seconds... (Attempt ${retryCount + 1})`);
-        await new Promise(resolve => setTimeout(resolve, 2000));
-        return this.generateTextWithGemini(prompt, maxTokens, retryCount + 1);
+      // Handle 429 Rate Limit or 500/503 Transient errors with retry
+      if ((status === 429 || status === 500 || status === 503) && retryCount < 2) {
+        const delay = status === 429 ? 5000 : 2000; // Wait longer for rate limits
+        this.logger.warn(
+          `GPT API returned ${status}: ${errorMsg}. Retrying in ${delay / 1000}s... (Attempt ${retryCount + 1})`
+        );
+        await new Promise((resolve) => setTimeout(resolve, delay));
+        return this.generateTextWithGPT(prompt, maxTokens, retryCount + 1);
       }
 
-      if (status === 404) {
-        // Try v1 if v1beta fails with 404
-        const v1Url = `https://generativelanguage.googleapis.com/v1/models/${this.geminiModel}:generateContent?key=${this.googleApiKey}`;
-        const v1Res = await axios.post(v1Url, body, { timeout: 60000 });
-        const v1Text = v1Res.data?.candidates?.[0]?.content?.parts?.[0]?.text;
-        if (v1Text) return v1Text.trim();
-      }
       throw error;
     }
-  }
-
-  private async generateTextWithGPT(prompt: string, maxTokens: number): Promise<string> {
-    if (!this.openaiApiKey) {
-      throw new Error('OPENAI_API_KEY is not configured');
-    }
-
-    const url = 'https://api.openai.com/v1/chat/completions';
-
-    const body = {
-      model: this.gptModel,
-      messages: [
-        {
-          role: 'user',
-          content: prompt,
-        },
-      ],
-      max_tokens: maxTokens,
-      temperature: 0.7,
-    };
-
-    const res = await axios.post(url, body, {
-      headers: {
-        Authorization: `Bearer ${this.openaiApiKey}`,
-        'Content-Type': 'application/json',
-      },
-      timeout: 60000,
-    });
-
-    const text = res.data?.choices?.[0]?.message?.content;
-
-    if (!text || typeof text !== 'string') {
-      throw new Error('Empty response from GPT');
-    }
-    return text.trim();
   }
 
   /* ----------------------------------------------------------
@@ -575,23 +544,57 @@ export class AIService {
         throw new Error('No image returned from image generation API');
       }
 
-      return images.slice(0, variations);
+      return String(imageUrl);
     } catch (error: any) {
-      this.logger.error(
-        "Text-to-image generation error",
-        error.response?.data || error.message,
-      );
-      const message =
-        error.response?.data?.error ||
-        error.response?.data?.message ||
-        error.message ||
-        "Failed to generate image";
+      this.logger.error('Image generation error', error.response?.data || error.message);
+      const status = error?.response?.status;
+      const safeStatus = (status === 401 || status === 403)
+        ? HttpStatus.BAD_GATEWAY
+        : HttpStatus.INTERNAL_SERVER_ERROR;
 
       throw new HttpException(
         `Failed to generate image: ${error.message}`,
-        HttpStatus.INTERNAL_SERVER_ERROR
+        safeStatus
       );
     }
+  }
+
+  /**
+   * Compatibility helper for callers that expect multiple images.
+   * Uses the existing single-image generator repeatedly.
+   */
+  async generateImages(
+    prompt: string,
+    variationsOrOptions: number | { variations?: number; [key: string]: any } = 1,
+  ): Promise<string[]> {
+    const variations =
+      typeof variationsOrOptions === 'number'
+        ? variationsOrOptions
+        : variationsOrOptions?.variations ?? 1;
+    const n = Math.max(1, Math.min(variations || 1, 4));
+    const out: string[] = [];
+    for (let i = 0; i < n; i += 1) {
+      out.push(await this.generateImage(prompt));
+    }
+    return out;
+  }
+
+  /**
+   * Compatibility helper for VideoService (older method name).
+   */
+  async generateTextToVideo(
+    prompt: string,
+    options: {
+      durationSeconds?: number;
+      model?: string;
+      videoType?: string;
+      platform?: string;
+      images?: string[];
+      audio?: string;
+    },
+  ): Promise<string> {
+    // Despite the private method name, it performs video generation.
+    return this.generateImagesWithGPT(prompt, options);
   }
 
   /** Hosted generator expects `text-to-video` / `image-to-video`, not DTO enums like `text`. */
@@ -679,13 +682,19 @@ export class AIService {
   private inferHttpStatusForVideoError(detail: string): number {
     const d = (detail || '').toLowerCase();
     // Upstream sometimes wraps a 402 into a 500 body; surface as 402 for UI.
-    if (d.includes('payment required') || d.includes('pre-paid credits') || d.includes('prepaid credits')) {
+    if (d.includes('payment required') || d.includes('pre-paid credits') || d.includes('prepaid credits') || d.includes('usage limit')) {
       return HttpStatus.PAYMENT_REQUIRED;
     }
     // Cloudflare timeout from generator
     if (d.includes('error code 524') || d.includes('a timeout occurred') || d.includes('status code 524')) {
       return HttpStatus.GATEWAY_TIMEOUT;
     }
+
+    // Upstream auth errors
+    if (d.includes('unauthorized') || d.includes('invalid api key') || d.includes('forbidden')) {
+      return HttpStatus.BAD_GATEWAY;
+    }
+
     return HttpStatus.INTERNAL_SERVER_ERROR;
   }
 
@@ -938,5 +947,66 @@ ${outputInstructions}
 `;
 
     return this.generateText(prompt, model, 300);
+  }
+
+  /**
+   * 3–5 ready-to-paste prompt strings for the merchant "prompt" box, from a short user fragment.
+   * Uses Gemini when configured; returns [] on failure so callers can use keyword fallbacks.
+   */
+  async suggestMerchantPromptStarters(params: {
+    userFragment: string;
+    platform: string;
+    contentType: 'text' | 'image' | 'video';
+    textType?: string;
+    tone?: string;
+    videoType?: string;
+  }): Promise<string[]> {
+    if (!this.googleApiKey || this.googleApiKey === 'your_google_api_key') {
+      return [];
+    }
+
+    const { userFragment, platform, contentType, textType, tone, videoType } = params;
+    const lines = [
+      'You generate short prompt ideas for a social media content AI.',
+      'The user typed a fragment (may be vague). Expand it into concrete, copy-paste-ready prompts.',
+      `Platform: ${platform}. Content type: ${contentType}.`,
+      textType ? `Text mode: ${textType}.` : '',
+      tone ? `Tone: ${tone}.` : '',
+      videoType ? `Video format: ${videoType}.` : '',
+      'Return exactly 5 distinct suggestions.',
+      'Each suggestion must be ONE complete instruction (one short paragraph max).',
+      'No numbering, bullets, or labels.',
+      'Output ONLY valid JSON with this exact shape:',
+      '{"suggestions":["...","...","...","...","..."]}',
+    ].filter(Boolean);
+
+    const prompt = `${lines.join('\n')}\n\nUser fragment:\n"""${userFragment.trim().replace(/"/g, "'")}"""`;
+
+    try {
+      const raw = await this.generateTextWithGemini(prompt, 1024);
+      return this.parseJsonSuggestionArray(raw).slice(0, 5);
+    } catch (e: any) {
+      this.logger.warn(
+        `suggestMerchantPromptStarters: ${e?.message || e}`,
+      );
+      return [];
+    }
+  }
+
+  private parseJsonSuggestionArray(raw: string): string[] {
+    let t = raw.trim();
+    if (t.startsWith('```')) {
+      t = t.replace(/^```(?:json)?\s*/i, '').replace(/```[\s]*$/i, '').trim();
+    }
+    try {
+      const obj = JSON.parse(t);
+      const arr = obj?.suggestions ?? obj?.prompts;
+      if (!Array.isArray(arr)) return [];
+      return arr
+        .filter((s: unknown) => typeof s === 'string' && String(s).trim().length > 0)
+        .map((s: string) => String(s).trim());
+    } catch {
+      return [];
+    }
   }
 }

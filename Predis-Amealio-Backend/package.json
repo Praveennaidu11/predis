@@ -9,11 +9,18 @@
     "start:dev": "nest start --watch",
     "start:prod": "node dist/main",
     "typeorm": "typeorm-ts-node-commonjs",
+    "migration:create": "typeorm-ts-node-commonjs migration:create src/common/database/migrations",
     "migration:generate": "typeorm-ts-node-commonjs migration:generate -d src/common/database/data-source.ts",
-    "migration:run": "typeorm-ts-node-commonjs migration:run -d src/common/database/data-source.ts",
-    "migration:revert": "typeorm-ts-node-commonjs migration:revert -d src/common/database/data-source.ts",
+    "migration:run": "typeorm-ts-node-commonjs migration:run -d src/common/database/data-source.ts --transaction none",
+    "migration:revert": "typeorm-ts-node-commonjs migration:revert -d src/common/database/data-source.ts --transaction none",
+    "migration:show": "typeorm-ts-node-commonjs migration:show -d src/common/database/data-source.ts",
     "seed": "ts-node src/common/database/seed.ts",
-    "test:db": "ts-node src/scripts/test-db-connection.ts"
+    "test:db": "ts-node src/scripts/test-db-connection.ts",
+    "check:requirements": "ts-node src/scripts/test-db-connection.ts",
+    "schema:check": "ts-node src/scripts/schema-drift-check.ts"
+    ,
+    "db:backup": "bash ./scripts/db/backup.sh",
+    "db:restore": "bash ./scripts/db/restore.sh"
   },
   "dependencies": {
     "@nestjs/common": "^10.0.0",

@@ -1,6 +1,6 @@
 'use client'; 
  
- import { useEffect, useMemo, useRef, useState } from 'react'; 
+import { Suspense, useEffect, useMemo, useRef, useState } from 'react'; 
  import DashboardLayout from '@/components/layout/DashboardLayout'; 
  import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'; 
  import { Button } from '@/components/ui/button'; 
@@ -30,6 +30,7 @@
  import { contentApi, ContentItem } from '@/lib/api/content'; 
  import { videoApi } from '@/lib/api/video'; 
  import { generationApi, PromptHistory } from '@/lib/api/generation';
+ import { brandsApi, Brand } from '@/lib/api/brands';
  import { useSearchParams } from 'next/navigation'; 
  import { 
    DropdownMenu, 
@@ -75,7 +76,7 @@
    'A promotional video for a new service launch', 
  ]; 
  
- const MAX_VISIBLE_SUGGESTIONS = 6; 
+ const MAX_VISIBLE_SUGGESTIONS = 5; 
  
  function normalizeForMatch(value: string) { 
    return value.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim(); 
@@ -137,7 +138,7 @@
    ); 
  } 
  
- export default function CreateContentPage() { 
+function CreateContentPageClient() { 
    const searchParams = useSearchParams(); 
  
    // ---------------------------------------- 
@@ -157,6 +158,10 @@
    const [overlayText, setOverlayText] = useState(''); 
    const [videoType, setVideoType] = useState<VideoType | null>(null); 
    const [duration, setDuration] = useState<Duration | null>(null); 
+ 
+   const [brands, setBrands] = useState<Brand[]>([]);
+   const [brandsLoading, setBrandsLoading] = useState(false);
+   const [brandId, setBrandId] = useState<string>(''); // optional
  
    const [prompt, setPrompt] = useState(''); 
    const [output, setOutput] = useState<string | null>(null); 
@@ -194,6 +199,10 @@
    useEffect(() => {
      fetchHistory();
    }, []);
+ 
+   useEffect(() => {
+     fetchBrands();
+   }, []);
 
    const fetchHistory = async () => {
      try {
@@ -201,8 +210,8 @@
        setHistory(data);
      } catch (e) {
        console.error('Failed to fetch history', e);
-     }
-   };
+    }
+  };
 
    const clearHistory = async () => {
      try {
@@ -211,6 +220,19 @@
        toast.success('History cleared');
      } catch (e) {
        toast.error('Failed to clear history');
+     }
+   };
+ 
+   const fetchBrands = async () => {
+     try {
+       setBrandsLoading(true);
+       const { data } = await brandsApi.list();
+       setBrands(Array.isArray(data) ? data : []);
+     } catch (e) {
+       console.error('Failed to fetch brands', e);
+       setBrands([]);
+     } finally {
+       setBrandsLoading(false);
      }
    };
 
@@ -247,6 +269,10 @@
              setPlatform(lower as Platform); 
            } 
          } 
+ 
+         if ((item as any).brandId) {
+           setBrandId(String((item as any).brandId));
+         }
  
          setPrompt(item.prompt || ''); 
  
@@ -294,12 +320,12 @@
        return; 
      } 
  
-     if (query.length < 8) { 
-       setAiSuggestions([]); 
-       setSuggestionsLoading(false); 
-       lastSuggestionQueryRef.current = ''; 
-       return; 
-     } 
+    if (query.length < 3) { 
+      setAiSuggestions([]); 
+      setSuggestionsLoading(false); 
+      lastSuggestionQueryRef.current = ''; 
+      return; 
+    } 
  
      const signature = JSON.stringify({ 
        query, 
@@ -672,6 +698,7 @@
             platform,
             model: 'wan',
             prompt,
+            brandId: brandId || undefined,
             videoType,
             duration,
           });
@@ -719,6 +746,7 @@
            platform, 
            model, 
            prompt, 
+           brandId: brandId || undefined,
            textType: contentType === 'text' ? textType : undefined, 
            tone: contentType === 'text' ? tone : undefined, 
            aspectRatio: contentType === 'image' ? aspectRatio : undefined, 
@@ -764,7 +792,7 @@
          type: contentType, 
          platform, 
          prompt, 
-         generatedText: contentType === 'text' ? output : undefined, 
+        brandId: brandId || undefined,
          generatedImage: contentType === 'image' ? output : undefined, 
         generatedVideo:
           contentType === 'video' &&
@@ -797,12 +825,13 @@
      setOverlayText(''); 
      setVideoType(null); 
      setDuration(null); 
+     setBrandId('');
      setPrompt(''); 
      setOutput(null); 
    }; 
  
    return ( 
-     <DashboardLayout title="Create Content"> 
+    <DashboardLayout> 
        <div className="flex gap-4 h-full p-6"> 
          {/* LEFT SIDE - Main Content Form */} 
          <div className="flex-1 space-y-3"> 
@@ -902,6 +931,36 @@
                </CardContent> 
              </Card> 
            )} 
+ 
+          {/* STEP 2.5 — Brand (Optional) */}
+          {canShowStep3 && (
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base font-semibold">
+                  Step 2.5: Brand (optional)
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                <div className="text-xs text-gray-500">
+                  Select a brand to associate with this content.
+                </div>
+                <select
+                  value={brandId}
+                  onChange={(e) => setBrandId(e.target.value)}
+                  className="w-full h-10 rounded-xl border border-gray-200 bg-white px-3 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+                >
+                  <option value="">
+                    {brandsLoading ? 'Loading brands…' : 'No brand'}
+                  </option>
+                  {brands.map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {b.name}
+                    </option>
+                  ))}
+                </select>
+              </CardContent>
+            </Card>
+          )}
  
            {/* STEP 3 — Dynamic Options */} 
            {canShowStep3 && ( 
@@ -1572,3 +1631,19 @@
      </DashboardLayout> 
    ); 
  } 
+
+export default function CreateContentPage() {
+  return (
+    <Suspense
+      fallback={
+        <DashboardLayout>
+          <div className="flex items-center justify-center h-64">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary" />
+          </div>
+        </DashboardLayout>
+      }
+    >
+      <CreateContentPageClient />
+    </Suspense>
+  );
+}

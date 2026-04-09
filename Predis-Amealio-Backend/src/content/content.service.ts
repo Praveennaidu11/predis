@@ -1,14 +1,35 @@
-import { Injectable, HttpException } from '@nestjs/common';
+import {
+  BadRequestException,
+  HttpException,
+  HttpStatus,
+  Injectable,
+  Logger,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { IsNull, Not, Repository } from 'typeorm';
+import { ConfigService } from '@nestjs/config';
+import axios from 'axios';
+import { join } from 'path';
+import { mkdir, writeFile } from 'fs/promises';
+import { randomUUID, createHash } from 'crypto';
+import { isIP } from 'net';
+import { lookup } from 'dns/promises';
 import { Content } from '../common/entities/content.entity';
 import { Brand } from '../common/entities/brand.entity';
 import { PromptHistory } from '../common/entities/prompt-history.entity';
 import { RedisService } from '../common/redis.service';
 import { AIService } from '../integrations/ai/ai.service';
 import { VideoService } from '../video/video.service';
+import { SocialService } from '../social/social.service';
 import { GenerateContentDto } from './dto/generate-content.dto';
+import { GenerateImageDto } from './dto/generate-image.dto';
+import { EditImageDto } from './dto/edit-image.dto';
 import { SaveContentDto } from './dto/save-content.dto';
+import { PromptSuggestionsDto } from './dto/prompt-suggestions.dto';
+import {
+  getDefaultFallbacksForType,
+  scoreFallbackSuggestions,
+} from './prompt-suggestion.fallback';
 
 @Injectable()
 export class ContentService {
@@ -33,6 +54,7 @@ export class ContentService {
     private aiService: AIService,
     private configService: ConfigService,
     private socialService: SocialService,
+    private videoService: VideoService,
   ) {
     this.imageRateWindowMs = Number(
       this.configService.get("IMAGE_RATE_LIMIT_WINDOW_MS") || 60000,
@@ -1120,150 +1142,22 @@ export class ContentService {
     return this.contentRepository.save(content);
   }
 
-  async updateContent(
-    userId: string,
-    contentId: string,
-    dto: UpdateContentDto,
-  ) {
-    const existing = await this.contentRepository.findOne({
-      where: { id: contentId, userId },
+  async getContent(userId: string, filter?: string, trash?: boolean) {
+    const where: any = { userId };
+    
+    if (filter && filter !== 'all') {
+      where.status = filter;
+    }
+
+    const content = await this.contentRepository.find({
+      where: trash ? { ...where, deletedAt: Not(IsNull()) } : where,
+      withDeleted: Boolean(trash),
+      order: { createdAt: 'DESC' },
+      take: 50,
+      relations: ['brand', 'analytics'],
     });
 
-    if (!existing) {
-      throw new HttpException("Content not found.", HttpStatus.NOT_FOUND);
-    }
-
-    if (dto.createVersion === true) {
-      const rootSourceId = existing.sourceContentId || existing.id;
-
-      const normalizedPrompt = this.normalizeComparableValue(dto.prompt ?? existing.prompt);
-      const normalizedText = this.normalizeComparableValue(dto.generatedText ?? existing.generatedText);
-      const normalizedImage = this.normalizeComparableValue(dto.generatedImage ?? existing.generatedImage);
-      const normalizedVideo = this.normalizeComparableValue(dto.generatedVideo ?? existing.generatedVideo);
-      const normalizedPlatform = this.normalizeComparableValue(dto.platform ?? existing.platform).toLowerCase();
-      const normalizedStatus = this.normalizeComparableValue(dto.status ?? existing.status ?? "draft").toLowerCase();
-      const normalizedMetadata = this.normalizeMetadataForComparison(dto.metadata ?? existing.metadata);
-
-      const allVersions = await this.contentRepository.find({
-        where: [
-          { id: rootSourceId, userId },
-          { sourceContentId: rootSourceId, userId },
-        ],
-      });
-      const maxVersion = allVersions.reduce(
-        (max, row) => Math.max(max, row.version || 1),
-        1,
-      );
-
-      const latestVersion = allVersions
-        .slice()
-        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0];
-
-      if (
-        latestVersion &&
-        this.isWithinDedupeWindow(latestVersion.createdAt) &&
-        this.normalizeComparableValue(latestVersion.prompt) === normalizedPrompt &&
-        this.normalizeComparableValue(latestVersion.generatedText) === normalizedText &&
-        this.normalizeComparableValue(latestVersion.generatedImage) === normalizedImage &&
-        this.normalizeComparableValue(latestVersion.generatedVideo) === normalizedVideo &&
-        this.normalizeComparableValue(latestVersion.platform).toLowerCase() === normalizedPlatform &&
-        this.normalizeComparableValue(latestVersion.status || "draft").toLowerCase() === normalizedStatus &&
-        this.normalizeMetadataForComparison(latestVersion.metadata) === normalizedMetadata
-      ) {
-        return latestVersion;
-      }
-
-      const versionedRow = this.contentRepository.create({
-        userId,
-        type: existing.type,
-        prompt: dto.prompt ?? existing.prompt,
-        generatedText: dto.generatedText ?? existing.generatedText,
-        generatedImage: dto.generatedImage ?? existing.generatedImage,
-        generatedVideo: dto.generatedVideo ?? existing.generatedVideo,
-        platform: dto.platform ?? existing.platform,
-        status: dto.status ?? existing.status ?? "draft",
-        brandId: dto.brandId ?? existing.brandId,
-        tags: dto.tags ?? existing.tags,
-        metadata: dto.metadata ?? existing.metadata,
-        sourceContentId: dto.sourceContentId ?? rootSourceId,
-        version: dto.version ?? maxVersion + 1,
-      });
-
-      return this.contentRepository.save(versionedRow);
-    }
-
-    await this.contentRepository.update(
-      { id: contentId, userId },
-      {
-        prompt: dto.prompt ?? existing.prompt,
-        generatedText: dto.generatedText ?? existing.generatedText,
-        generatedImage: dto.generatedImage ?? existing.generatedImage,
-        generatedVideo: dto.generatedVideo ?? existing.generatedVideo,
-        platform: dto.platform ?? existing.platform,
-        status: dto.status ?? existing.status,
-        brandId: dto.brandId ?? existing.brandId,
-        tags: dto.tags ?? existing.tags,
-        metadata: dto.metadata ?? existing.metadata,
-        sourceContentId: dto.sourceContentId ?? existing.sourceContentId,
-        version: dto.version ?? existing.version ?? 1,
-      },
-    );
-
-    return this.getContentById(userId, contentId);
-  }
-
-  async getContent(
-    userId: string,
-    options: {
-      filter?: string;
-      q?: string;
-      tag?: string;
-      page?: number;
-      limit?: number;
-    } = {},
-  ) {
-    const page = Math.max(1, Number(options.page) || 1);
-    const limit = Math.min(Math.max(1, Number(options.limit) || 20), 100);
-    const skip = (page - 1) * limit;
-
-    const qb = this.contentRepository
-      .createQueryBuilder("content")
-      .leftJoinAndSelect("content.brand", "brand")
-      .leftJoinAndSelect("content.analytics", "analytics")
-      .where("content.userId = :userId", { userId });
-
-    // Status filter
-    if (options.filter && options.filter !== "all") {
-      qb.andWhere("content.status = :status", { status: options.filter });
-    }
-
-    // Full-text search across prompt and generated text
-    if (options.q?.trim()) {
-      const search = `%${options.q.trim().toLowerCase()}%`;
-      qb.andWhere(
-        "(LOWER(content.prompt) LIKE :search OR LOWER(content.generatedText) LIKE :search)",
-        { search },
-      );
-    }
-
-    // Tag filter — simple-array stores comma-separated values
-    if (options.tag?.trim()) {
-      qb.andWhere("content.tags LIKE :tag", {
-        tag: `%${options.tag.trim()}%`,
-      });
-    }
-
-    qb.orderBy("content.createdAt", "DESC").skip(skip).take(limit);
-
-    const [data, total] = await qb.getManyAndCount();
-
-    return {
-      data,
-      total,
-      page,
-      limit,
-      totalPages: Math.ceil(total / limit),
-    };
+    return content;
   }
 
   async getContentById(userId: string, contentId: string) {
@@ -1274,95 +1168,63 @@ export class ContentService {
   }
 
   async deleteContent(userId: string, contentId: string) {
-    const existing = await this.contentRepository.findOne({
-      where: { id: contentId, userId },
-    });
-
-    if (!existing) {
-      throw new HttpException("Content not found.", HttpStatus.NOT_FOUND);
-    }
-
-    // Soft delete: sets deleted_at timestamp, preserves analytics data
-    await this.contentRepository.softDelete({ id: contentId, userId });
-    return { message: "Content deleted successfully." };
+    const res = await this.contentRepository.softDelete({
+      id: contentId,
+      userId,
+    } as any);
+    return { deleted: res.affected ? 1 : 0 };
   }
 
-  async scheduleContent(
-    userId: string,
-    contentId: string,
-    scheduledAtInput: string | Date,
-  ) {
-    const content = await this.getContentById(userId, contentId);
-    if (!content) {
-      throw new HttpException("Content not found.", HttpStatus.NOT_FOUND);
+  async scheduleContent(userId: string, contentId: string, scheduledAt: string | Date) {
+    const when = scheduledAt instanceof Date ? scheduledAt : new Date(String(scheduledAt));
+    if (isNaN(when.getTime())) {
+      throw new BadRequestException('Invalid scheduledAt timestamp.');
+    }
+    if (when.getTime() < Date.now()) {
+      throw new BadRequestException('scheduledAt must be a future time.');
     }
 
-    if (content.status?.toLowerCase() === "published") {
-      throw new BadRequestException(
-        "Published content cannot be scheduled again.",
-      );
-    }
+    const res = await this.contentRepository
+      .createQueryBuilder()
+      .update()
+      .set({
+        status: 'scheduled',
+        scheduledAt: when,
+      })
+      .where('id = :id AND user_id = :userId AND deleted_at IS NULL', {
+        id: contentId,
+        userId,
+      })
+      .execute();
 
-    // Pre-flight: every scheduled post must have a target platform
-    if (!content.platform) {
-      throw new BadRequestException(
-        "Content must have a platform set before scheduling. " +
-        "Please specify a platform (e.g. facebook, instagram) and try again.",
-      );
-    }
-
-    // Pre-flight: the user must have a connected + active account for that platform
-    const hasAccount = await this.socialService.hasActiveAccount(
-      userId,
-      content.platform,
-    );
-    if (!hasAccount) {
-      throw new BadRequestException(
-        `You don't have a connected ${content.platform} account. ` +
-        `Please go to Settings → Social Accounts, connect your ${content.platform} account, ` +
-        "and then try scheduling again.",
-      );
-    }
-
-    const scheduledAt = this.parseScheduledAt(scheduledAtInput);
-    await this.contentRepository.update(
-      { id: contentId, userId },
-      {
-        status: "scheduled",
-        scheduledAt,
-        publishedAt: null,
-      },
-    );
-
+    if (!res.affected) return null;
     return this.getContentById(userId, contentId);
   }
 
   async cancelSchedule(userId: string, contentId: string) {
-    const content = await this.getContentById(userId, contentId);
-    if (!content) {
-      throw new HttpException("Content not found.", HttpStatus.NOT_FOUND);
-    }
-
-    // Reject cancellation if the scheduler has already claimed this item and
-    // is actively publishing it — the platform call may be in-flight and
-    // cannot be undone. The status will transition to 'published' or 'failed'.
-    if (content.status === "publishing") {
-      throw new BadRequestException(
-        "Content is currently being published and cannot be cancelled. " +
-        "Please wait for the publish to complete.",
-      );
-    }
-
-    // Conditional WHERE ensures this is a no-op if the scheduler claimed the
-    // item (status → 'publishing') between the read above and this write.
-    await this.contentRepository.update(
-      { id: contentId, userId, status: "scheduled" },
-      {
-        status: "draft",
+    const res = await this.contentRepository
+      .createQueryBuilder()
+      .update()
+      .set({
+        status: 'draft',
         scheduledAt: null,
-      },
-    );
+      } as any)
+      .where('id = :id AND user_id = :userId AND deleted_at IS NULL', {
+        id: contentId,
+        userId,
+      })
+      .execute();
 
+    if (!res.affected) return null;
+    return this.getContentById(userId, contentId);
+  }
+
+  async restoreContent(userId: string, contentId: string) {
+    const res = await this.contentRepository.restore({
+      id: contentId,
+      userId,
+    } as any);
+    if (!res.affected) return null;
     return this.getContentById(userId, contentId);
   }
 
@@ -1429,5 +1291,44 @@ export class ContentService {
       totalShares,
       recentContent,
     };
+  }
+
+  /**
+   * Dynamic prompt suggestions (3–5) from user fragment: Gemini + keyword fallback.
+   */
+  async getPromptSuggestions(_userId: string, dto: PromptSuggestionsDto) {
+    const fragment = dto.prompt.trim();
+    if (fragment.length < 2) {
+      return { suggestions: [] as string[] };
+    }
+
+    const ai = await this.aiService.suggestMerchantPromptStarters({
+      userFragment: fragment,
+      platform: dto.platform,
+      contentType: dto.type,
+      textType: dto.textType,
+      tone: dto.tone,
+      videoType: dto.videoType,
+    });
+
+    const fb = scoreFallbackSuggestions(fragment, dto.type, 5);
+
+    const merged: string[] = [];
+    const seen = new Set<string>();
+    for (const s of [...ai, ...fb]) {
+      const k = s.trim().toLowerCase();
+      if (!k || seen.has(k)) continue;
+      seen.add(k);
+      merged.push(s.trim());
+      if (merged.length >= 5) break;
+    }
+
+    if (merged.length === 0) {
+      return {
+        suggestions: getDefaultFallbacksForType(dto.type, 5),
+      };
+    }
+
+    return { suggestions: merged.slice(0, 5) };
   }
 }

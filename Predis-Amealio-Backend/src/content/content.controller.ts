@@ -3,6 +3,7 @@ import { ContentService } from './content.service';
 import { PromptHistoryService } from './prompt-history.service';
 import { GenerateContentDto } from './dto/generate-content.dto';
 import { SaveContentDto } from './dto/save-content.dto';
+import { PromptSuggestionsDto } from './dto/prompt-suggestions.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { GenerateImageDto } from './dto/generate-image.dto';
 import { EditImageDto } from './dto/edit-image.dto';
@@ -48,25 +49,9 @@ export class ContentController {
     return this.contentService.saveContent(req.user.userId, dto);
   }
 
-  @Patch('content/:id')
-  async updateContent(
-    @Request() req,
-    @Param('id') id: string,
-    @Body() dto: UpdateContentDto,
-  ) {
-    return this.contentService.updateContent(req.user.userId, id, dto);
-  }
-
-  @Get('image/download')
-  async downloadImage(
-    @Query('url') url: string,
-    @Res() res: Response,
-  ) {
-    const result = await this.contentService.downloadImage(url);
-    res.setHeader('Content-Type', result.contentType);
-    res.setHeader('Content-Disposition', `attachment; filename="${result.fileName}"`);
-    res.setHeader('Cache-Control', 'no-store');
-    res.send(result.buffer);
+  @Post('prompt-suggestions')
+  async promptSuggestions(@Request() req, @Body() dto: PromptSuggestionsDto) {
+    return this.contentService.getPromptSuggestions(req.user.userId, dto);
   }
 
   @Get('dashboard')
@@ -74,32 +59,14 @@ export class ContentController {
     return this.contentService.getDashboardStats(req.user.userId);
   }
 
-  // GET /api/merchant/content?filter=draft&q=food&tag=promo&page=1&limit=20
-  @Get('content')
+  @Get('content/list')
   async getContent(
     @Request() req,
     @Query('filter') filter?: string,
-    @Query('q') q?: string,
-    @Query('tag') tag?: string,
-    @Query('page') page?: string,
-    @Query('limit') limit?: string,
+    @Query('trash') trash?: string,
   ) {
-    return this.contentService.getContent(req.user.userId, {
-      filter,
-      q,
-      tag,
-      page: page ? parseInt(page, 10) : undefined,
-      limit: limit ? parseInt(limit, 10) : undefined,
-    });
-  }
-
-  // Alias kept for backward compat with calendar page (returns scheduled items, page 1 limit 100)
-  @Get('content/scheduled')
-  async getScheduledContent(@Request() req) {
-    return this.contentService.getContent(req.user.userId, {
-      filter: 'scheduled',
-      limit: 100,
-    });
+    const isTrash = trash === '1' || String(trash).toLowerCase() === 'true';
+    return this.contentService.getContent(req.user.userId, filter, isTrash);
   }
 
   @Get('content/:id')
@@ -110,6 +77,11 @@ export class ContentController {
   @Delete('content/:id')
   async deleteContent(@Request() req, @Param('id') id: string) {
     return this.contentService.deleteContent(req.user.userId, id);
+  }
+
+  @Post('content/:id/restore')
+  async restoreContent(@Request() req, @Param('id') id: string) {
+    return this.contentService.restoreContent(req.user.userId, id);
   }
 
   @Post('content/:id/schedule')

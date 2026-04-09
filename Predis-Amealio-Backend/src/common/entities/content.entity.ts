@@ -75,8 +75,7 @@ export class Content {
   @UpdateDateColumn({ name: 'updated_at' })
   updatedAt: Date;
 
-  // Soft-delete: records are flagged instead of physically removed
-  @DeleteDateColumn({ name: 'deleted_at', nullable: true })
+  @DeleteDateColumn({ name: 'deleted_at' })
   deletedAt: Date;
 
   @ManyToOne(() => User, (user) => user.content, { onDelete: 'CASCADE' })

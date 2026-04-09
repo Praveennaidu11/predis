@@ -1,11 +1,11 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import axios from 'axios';
 import { toast } from 'sonner';
 
-export default function OAuthCallbackPage() {
+function OAuthCallbackClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [status, setStatus] = useState<'loading' | 'success' | 'error'>('loading');
@@ -137,5 +137,19 @@ export default function OAuthCallbackPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function OAuthCallbackPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen flex items-center justify-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary" />
+        </div>
+      }
+    >
+      <OAuthCallbackClient />
+    </Suspense>
   );
 }

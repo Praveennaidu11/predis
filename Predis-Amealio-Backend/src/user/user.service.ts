@@ -70,22 +70,50 @@ export class UserService {
       let recentContent = [];
       
       try {
-        // Get counts safely
-        [totalContent, scheduledPosts, publishedPosts, brands, socialAccounts] = await Promise.all([
-          this.contentRepository.count({ where: { userId } }).catch(() => 0),
-          this.contentRepository.count({ where: { userId, status: 'scheduled' } }).catch(() => 0),
-          this.contentRepository.count({ where: { userId, status: 'published' } }).catch(() => 0),
+        // Reduce round-trips: compute content counts with one grouped query.
+        const [contentByStatus, brandsCount, socialCount] = await Promise.all([
+          this.contentRepository
+            .createQueryBuilder('c')
+            .select('c.status', 'status')
+            .addSelect('COUNT(*)', 'count')
+            .where('c.userId = :userId', { userId })
+            .groupBy('c.status')
+            .getRawMany<{ status: string; count: string }>()
+            .catch(() => []),
           this.brandRepository.count({ where: { userId } }).catch(() => 0),
           this.socialAccountRepository.count({ where: { userId } }).catch(() => 0),
         ]);
 
+        const byStatus = Object.fromEntries(
+          contentByStatus.map((r) => [r.status, parseInt(r.count, 10)]),
+        ) as Record<string, number>;
+        totalContent = Object.values(byStatus).reduce((a, b) => a + b, 0);
+        scheduledPosts = byStatus['scheduled'] || 0;
+        publishedPosts = byStatus['published'] || 0;
+        brands = brandsCount;
+        socialAccounts = socialCount;
+
         // Get recent content safely
-        recentContent = await this.contentRepository.find({
-          where: { userId },
-          order: { createdAt: 'DESC' },
-          take: 5,
-          relations: ['brand'],
-        }).catch(() => []);
+        recentContent = await this.contentRepository
+          .createQueryBuilder('c')
+          .leftJoinAndSelect('c.brand', 'b')
+          .where('c.userId = :userId', { userId })
+          .orderBy('c.createdAt', 'DESC')
+          .take(5)
+          .select([
+            'c.id',
+            'c.type',
+            'c.status',
+            'c.platform',
+            'c.createdAt',
+            'c.updatedAt',
+            'c.brandId',
+            'b.id',
+            'b.name',
+            'b.logo',
+          ])
+          .getMany()
+          .catch(() => []);
       } catch (error) {
         console.error('Error fetching dashboard stats:', error);
         // Continue with default values
