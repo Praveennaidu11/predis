@@ -15,7 +15,9 @@ export default function CalendarPage() {
       try {
         setLoading(true);
         const response = await contentApi.getContent({ filter: 'scheduled', limit: 100 });
-        setItems(response.data.data || []);
+        const raw: any = response.data;
+        const items = Array.isArray(raw) ? raw : Array.isArray(raw?.data) ? raw.data : [];
+        setItems(items);
       } catch (error) {
         console.error('Failed to load scheduled content:', error);
         setItems([]);

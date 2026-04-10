@@ -176,12 +176,28 @@ export const contentApi = {
 
   getContentById: (id: string) => apiClient.get<ContentItem>(`/merchant/content/${id}`),
 
+  updateContent: (id: string, data: Partial<ContentItem> & { createVersion?: boolean }) =>
+    apiClient.patch<ContentItem>(`/merchant/content/${id}`, data),
+
   deleteContent: (id: string) => apiClient.delete(`/merchant/content/${id}`),
   restoreContent: (id: string) => apiClient.post(`/merchant/content/${id}/restore`),
 
   scheduleContent: (id: string, scheduledAt: string) =>
     apiClient.post(`/merchant/content/${id}/schedule`, { scheduledAt }),
   cancelSchedule: (id: string) => apiClient.delete(`/merchant/content/${id}/schedule`),
+
+  getContentPaginated: (params?: GetContentParams, extra?: { trash?: boolean }) => {
+    const qp: any = {};
+    if (params?.filter && params.filter !== 'all') qp.filter = params.filter;
+    if (params?.q) qp.q = params.q;
+    if (params?.tag) qp.tag = params.tag;
+    if (params?.page) qp.page = params.page;
+    if (params?.limit) qp.limit = params.limit;
+    if (extra?.trash) qp.trash = '1';
+    return apiClient.get<PaginatedContentResponse>('/merchant/content', {
+      params: Object.keys(qp).length ? qp : undefined,
+    });
+  },
 
   promptSuggestions: (data: any) => apiClient.post('/merchant/prompt-suggestions', data),
 

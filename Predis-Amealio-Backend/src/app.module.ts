@@ -46,7 +46,6 @@ const validateEnv = (env: Record<string, any>) => {
       inject: [ConfigService],
       useFactory: (configService: ConfigService) => {
         const nodeEnv = String(configService.get('NODE_ENV') || '').toLowerCase();
-        const isDev = nodeEnv === 'development';
         return {
         type: 'postgres',
         host: configService.get('DB_HOST', 'localhost'),
@@ -55,8 +54,9 @@ const validateEnv = (env: Record<string, any>) => {
         password: configService.get('DB_PASSWORD', 'postgres'),
         database: configService.get('DB_NAME', 'amealio_db'),
         entities: Object.values(entities),
-        // IMPORTANT: Never auto-sync schema outside local development.
-        synchronize: isDev,
+        // IMPORTANT: Never auto-sync schema (use migrations).
+        // Schema sync can fail on real data (e.g., existing duplicate emails).
+        synchronize: false,
         logging: configService.get('NODE_ENV') === 'development',
         ssl:
           configService.get('DB_SSL') === 'true' ||

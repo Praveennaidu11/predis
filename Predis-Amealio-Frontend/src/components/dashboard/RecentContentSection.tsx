@@ -29,7 +29,10 @@ export default function RecentContentSection({
       console.log(`Fetching content with filter: ${filter}...`);
       const response = await contentApi.getContent({ filter, limit: 10 });
       console.log('Content response:', response.data);
-      setContent(response.data.data);
+      // API returns either ContentItem[] or a paginated shape { data: ContentItem[] }
+      const raw: any = response.data;
+      const items = Array.isArray(raw) ? raw : Array.isArray(raw?.data) ? raw.data : [];
+      setContent(items);
     } catch (error) {
       console.error('Failed to fetch content:', error);
       setContent([]);

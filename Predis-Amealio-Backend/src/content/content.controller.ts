@@ -39,8 +39,19 @@ export class ContentController {
     return this.contentService.generateImage(req.user.userId, dto);
   }
 
+  // Backward/forward compatibility with frontend route naming
+  @Post('images/generate')
+  async generateImagePlural(@Request() req, @Body() dto: GenerateImageDto) {
+    return this.contentService.generateImage(req.user.userId, dto);
+  }
+
   @Post('image/edit')
   async editImage(@Request() req, @Body() dto: EditImageDto) {
+    return this.contentService.editImage(req.user.userId, dto);
+  }
+
+  @Post('images/edit')
+  async editImagePlural(@Request() req, @Body() dto: EditImageDto) {
     return this.contentService.editImage(req.user.userId, dto);
   }
 
@@ -64,14 +75,73 @@ export class ContentController {
     @Request() req,
     @Query('filter') filter?: string,
     @Query('trash') trash?: string,
+    @Query('q') q?: string,
+    @Query('tag') tag?: string,
+    @Query('limit') limit?: string,
   ) {
     const isTrash = trash === '1' || String(trash).toLowerCase() === 'true';
-    return this.contentService.getContent(req.user.userId, filter, isTrash);
+    const parsedLimit =
+      limit && !Number.isNaN(parseInt(limit, 10)) ? parseInt(limit, 10) : undefined;
+    return this.contentService.getContent(req.user.userId, {
+      filter,
+      trash: isTrash,
+      q,
+      tag,
+      limit: parsedLimit,
+    });
+  }
+
+  /**
+   * Paginated/searchable list endpoint.
+   * Returns { data, total, page, limit, totalPages }.
+   */
+  @Get('content')
+  async getContentPaginated(
+    @Request() req,
+    @Query('filter') filter?: string,
+    @Query('trash') trash?: string,
+    @Query('q') q?: string,
+    @Query('tag') tag?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    const isTrash = trash === '1' || String(trash).toLowerCase() === 'true';
+    const parsedPage =
+      page && !Number.isNaN(parseInt(page, 10)) ? parseInt(page, 10) : 1;
+    const parsedLimit =
+      limit && !Number.isNaN(parseInt(limit, 10)) ? parseInt(limit, 10) : 20;
+
+    return this.contentService.getContentPaginated(req.user.userId, {
+      filter,
+      trash: isTrash,
+      q,
+      tag,
+      page: parsedPage,
+      limit: parsedLimit,
+    });
   }
 
   @Get('content/:id')
   async getContentById(@Request() req, @Param('id') id: string) {
     return this.contentService.getContentById(req.user.userId, id);
+  }
+
+  @Patch('content/:id')
+  async updateContent(
+    @Request() req,
+    @Param('id') id: string,
+    @Body() dto: UpdateContentDto,
+  ) {
+    return this.contentService.updateContent(req.user.userId, id, dto);
+  }
+
+  @Put('content/:id')
+  async replaceContent(
+    @Request() req,
+    @Param('id') id: string,
+    @Body() dto: UpdateContentDto,
+  ) {
+    return this.contentService.updateContent(req.user.userId, id, dto);
   }
 
   @Delete('content/:id')

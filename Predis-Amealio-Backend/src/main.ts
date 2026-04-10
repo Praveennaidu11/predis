@@ -15,6 +15,12 @@ async function bootstrap() {
   // Global prefix
   app.setGlobalPrefix('api');
 
+  // Serve temp assets (brand logos, generated media, etc.)
+  // Mounted outside `/api` so URLs like `/temp/...` work.
+  app.useStaticAssets(join(process.cwd(), 'temp'), {
+    prefix: '/temp',
+  });
+
   // Enable CORS
   app.enableCors({
     origin: process.env.CORS_ORIGIN?.split(',') || ['http://localhost:5000'],

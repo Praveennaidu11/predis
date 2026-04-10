@@ -82,6 +82,10 @@ export class AuthService {
       throw new UnauthorizedException('Invalid password');
     }
 
+    if (dto.role && user.role && dto.role !== user.role) {
+      throw new UnauthorizedException(`Invalid role for this account`);
+    }
+
     const token = this.generateToken(user.id, user.email, user.role);
 
     return {

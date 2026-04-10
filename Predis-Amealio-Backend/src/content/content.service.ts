@@ -26,6 +26,7 @@ import { GenerateImageDto } from './dto/generate-image.dto';
 import { EditImageDto } from './dto/edit-image.dto';
 import { SaveContentDto } from './dto/save-content.dto';
 import { PromptSuggestionsDto } from './dto/prompt-suggestions.dto';
+import { UpdateContentDto } from './dto/update-content.dto';
 import {
   getDefaultFallbacksForType,
   scoreFallbackSuggestions,
@@ -1135,29 +1136,172 @@ export class ContentService {
       platform: dto.platform,
       status: dto.status || "draft",
       brandId: dto.brandId,
-      tags: dto.tags ?? undefined,
+      tags: this.normalizeTags(dto.tags),
       metadata: dto.metadata,
     });
 
     return this.contentRepository.save(content);
   }
 
-  async getContent(userId: string, filter?: string, trash?: boolean) {
+  private normalizeTags(tags?: string[] | null): string[] | undefined {
+    if (!tags) return undefined;
+    if (!Array.isArray(tags)) return undefined;
+    const out: string[] = [];
+    const seen = new Set<string>();
+    for (const raw of tags) {
+      const cleaned = String(raw || "")
+        .split(",")
+        .map((t) => t.trim())
+        .filter(Boolean)
+        .map((t) => t.toLowerCase());
+      for (const t of cleaned) {
+        if (!t) continue;
+        if (t.length > 40) continue;
+        if (seen.has(t)) continue;
+        seen.add(t);
+        out.push(t);
+      }
+    }
+    return out.length ? out : undefined;
+  }
+
+  async getContent(
+    userId: string,
+    params?:
+      | string
+      | {
+          filter?: string;
+          trash?: boolean;
+          q?: string;
+          tag?: string;
+          limit?: number;
+        },
+    trash?: boolean,
+  ) {
+    // Backward compatible signature: getContent(userId, filter?, trash?)
+    const resolved =
+      typeof params === "string"
+        ? { filter: params, trash }
+        : { ...(params || {}), trash: params?.trash ?? trash };
+
     const where: any = { userId };
     
-    if (filter && filter !== 'all') {
-      where.status = filter;
+    if (resolved.filter && resolved.filter !== "all") {
+      where.status = resolved.filter;
     }
 
-    const content = await this.contentRepository.find({
-      where: trash ? { ...where, deletedAt: Not(IsNull()) } : where,
-      withDeleted: Boolean(trash),
-      order: { createdAt: 'DESC' },
-      take: 50,
-      relations: ['brand', 'analytics'],
-    });
+    const take = Math.min(Math.max(1, Number(resolved.limit || 50)), 200);
 
-    return content;
+    // If no search criteria, keep the previous simple query behavior.
+    if (!resolved.q && !resolved.tag) {
+      const content = await this.contentRepository.find({
+        where: resolved.trash
+          ? { ...where, deletedAt: Not(IsNull()) }
+          : where,
+        withDeleted: Boolean(resolved.trash),
+        order: { createdAt: "DESC" },
+        take,
+        relations: ["brand", "analytics"],
+      });
+      return content;
+    }
+
+    const qb = this.contentRepository
+      .createQueryBuilder("content")
+      .leftJoinAndSelect("content.brand", "brand")
+      .leftJoinAndSelect("content.analytics", "analytics")
+      .where("content.userId = :userId", { userId })
+      .orderBy("content.createdAt", "DESC")
+      .take(take);
+
+    if (resolved.filter && resolved.filter !== "all") {
+      qb.andWhere("content.status = :status", { status: resolved.filter });
+    }
+
+    if (resolved.trash) {
+      qb.withDeleted();
+      qb.andWhere("content.deletedAt IS NOT NULL");
+    } else {
+      qb.andWhere("content.deletedAt IS NULL");
+    }
+
+    if (resolved.q) {
+      const q = `%${String(resolved.q).trim()}%`;
+      qb.andWhere(
+        "(content.prompt ILIKE :q OR content.generatedText ILIKE :q)",
+        { q },
+      );
+    }
+
+    if (resolved.tag) {
+      // TypeORM simple-array is stored as comma-separated text.
+      // We match loosely; tags are normalized to lowercase.
+      const tagNeedle = `%${String(resolved.tag).trim().toLowerCase()}%`;
+      qb.andWhere("content.tags ILIKE :tag", { tag: tagNeedle });
+    }
+
+    return qb.getMany();
+
+  }
+
+  async getContentPaginated(
+    userId: string,
+    params: {
+      filter?: string;
+      trash?: boolean;
+      q?: string;
+      tag?: string;
+      page?: number;
+      limit?: number;
+    },
+  ) {
+    const page = Math.max(1, Number(params.page || 1));
+    const limit = Math.min(Math.max(1, Number(params.limit || 20)), 100);
+    const offset = (page - 1) * limit;
+
+    const qb = this.contentRepository
+      .createQueryBuilder("content")
+      .leftJoinAndSelect("content.brand", "brand")
+      .leftJoinAndSelect("content.analytics", "analytics")
+      .where("content.userId = :userId", { userId })
+      .orderBy("content.createdAt", "DESC")
+      .skip(offset)
+      .take(limit);
+
+    if (params.filter && params.filter !== "all") {
+      qb.andWhere("content.status = :status", { status: params.filter });
+    }
+
+    if (params.trash) {
+      qb.withDeleted();
+      qb.andWhere("content.deletedAt IS NOT NULL");
+    } else {
+      qb.andWhere("content.deletedAt IS NULL");
+    }
+
+    if (params.q) {
+      const q = `%${String(params.q).trim()}%`;
+      qb.andWhere(
+        "(content.prompt ILIKE :q OR content.generatedText ILIKE :q)",
+        { q },
+      );
+    }
+
+    if (params.tag) {
+      const tagNeedle = `%${String(params.tag).trim().toLowerCase()}%`;
+      qb.andWhere("content.tags ILIKE :tag", { tag: tagNeedle });
+    }
+
+    const [data, total] = await qb.getManyAndCount();
+    const totalPages = Math.max(1, Math.ceil(total / limit));
+
+    return {
+      data,
+      total,
+      page,
+      limit,
+      totalPages,
+    };
   }
 
   async getContentById(userId: string, contentId: string) {
@@ -1165,6 +1309,90 @@ export class ContentService {
       where: { id: contentId, userId },
       relations: ["brand", "analytics"],
     });
+  }
+
+  private async createVersionFromExisting(
+    userId: string,
+    existing: Content,
+    patch: UpdateContentDto,
+  ) {
+    const rootSourceId = existing.sourceContentId || existing.id;
+    const allVersions = await this.contentRepository.find({
+      where: [
+        { id: rootSourceId, userId },
+        { sourceContentId: rootSourceId, userId },
+      ],
+    });
+    const maxVersion = allVersions.reduce(
+      (max, row) => Math.max(max, row.version || 1),
+      1,
+    );
+    const nextVersion = maxVersion + 1;
+
+    const mergedMetadata = {
+      ...(existing.metadata || {}),
+      ...(patch.metadata || {}),
+    };
+
+    const row = this.contentRepository.create({
+      userId,
+      type: existing.type,
+      prompt: patch.prompt ?? existing.prompt,
+      generatedText: patch.generatedText ?? existing.generatedText,
+      generatedImage: patch.generatedImage ?? existing.generatedImage,
+      generatedVideo: patch.generatedVideo ?? existing.generatedVideo,
+      platform: patch.platform ?? existing.platform,
+      status: patch.status ?? existing.status,
+      brandId: patch.brandId ?? existing.brandId,
+      tags: patch.tags ? this.normalizeTags(patch.tags) : existing.tags,
+      metadata: mergedMetadata,
+      sourceContentId: rootSourceId,
+      version: nextVersion,
+    });
+
+    return this.contentRepository.save(row);
+  }
+
+  async updateContent(userId: string, contentId: string, dto: UpdateContentDto) {
+    const existing = await this.contentRepository.findOne({
+      where: { id: contentId, userId },
+      withDeleted: false,
+    });
+
+    if (!existing) {
+      throw new HttpException("Content not found.", HttpStatus.NOT_FOUND);
+    }
+
+    // If scheduling state is being edited directly via status, guard a few transitions.
+    const nextStatus = dto.status ? String(dto.status).toLowerCase() : undefined;
+    if (nextStatus === "scheduled" && dto.metadata?.scheduledAt) {
+      // no-op; prefer schedule API
+    }
+
+    if (dto.createVersion === true) {
+      return this.createVersionFromExisting(userId, existing, dto);
+    }
+
+    // Update in place (default).
+    if (dto.prompt !== undefined) existing.prompt = dto.prompt;
+    if (dto.generatedText !== undefined) existing.generatedText = dto.generatedText;
+    if (dto.generatedImage !== undefined) existing.generatedImage = dto.generatedImage;
+    if (dto.generatedVideo !== undefined) existing.generatedVideo = dto.generatedVideo;
+    if (dto.platform !== undefined) existing.platform = dto.platform;
+    if (dto.status !== undefined) existing.status = dto.status;
+    if (dto.brandId !== undefined) existing.brandId = dto.brandId;
+    if (dto.tags !== undefined) existing.tags = this.normalizeTags(dto.tags);
+    if (dto.metadata !== undefined) {
+      existing.metadata = {
+        ...(existing.metadata || {}),
+        ...(dto.metadata || {}),
+      };
+    }
+    if (dto.sourceContentId !== undefined) existing.sourceContentId = dto.sourceContentId;
+    if (dto.version !== undefined) existing.version = dto.version;
+
+    await this.contentRepository.save(existing);
+    return this.getContentById(userId, contentId);
   }
 
   async deleteContent(userId: string, contentId: string) {
@@ -1176,13 +1404,7 @@ export class ContentService {
   }
 
   async scheduleContent(userId: string, contentId: string, scheduledAt: string | Date) {
-    const when = scheduledAt instanceof Date ? scheduledAt : new Date(String(scheduledAt));
-    if (isNaN(when.getTime())) {
-      throw new BadRequestException('Invalid scheduledAt timestamp.');
-    }
-    if (when.getTime() < Date.now()) {
-      throw new BadRequestException('scheduledAt must be a future time.');
-    }
+    const when = this.parseScheduledAt(scheduledAt);
 
     const res = await this.contentRepository
       .createQueryBuilder()

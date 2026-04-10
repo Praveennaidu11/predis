@@ -68,7 +68,7 @@ export class AIService {
       this.configService.get<string>('GOOGLE_API_KEY');
     this.geminiModel = this.configService.get<string>('GEMINI_MODEL') || 'gemini-flash-latest';
 
-    this.hfToken = this.configService.get<string>('HUGGINGFACE_API_TOKEN')!;
+    this.hfToken = this.configService.get<string>('HUGGINGFACE_API_TOKEN') || '';
     this.hfDefaultTextModel =
       this.configService.get<string>("HF_TEXT_MODEL") ||
       "HuggingFaceH4/zephyr-7b-beta";
@@ -482,69 +482,169 @@ export class AIService {
   /* ----------------------------------------------------------
       IMAGE GENERATION (External text-to-image API)
     ---------------------------------------------------------- */
+  private async generateImageViaExternalApi(
+    prompt: string,
+    modelOverride?: string,
+  ): Promise<string> {
+    // Attempt A: legacy endpoint (/generate), fallback to /generate-text-image
+    let response: any;
+    const headers: Record<string, string> = {};
+    const authToken =
+      this.configService.get<string>('IMAGE_API_AUTH_TOKEN') ||
+      this.configService.get<string>('HUGGINGFACE_API_TOKEN') ||
+      '';
+    if (authToken) {
+      headers.Authorization = `Bearer ${authToken}`;
+    }
+
+    const modelToUse = (modelOverride && String(modelOverride).trim()) || this.hfDefaultImageModel;
+
+    try {
+      response = await axios.post(
+        `${this.imageApiBaseUrl}/generate`,
+        { prompt, model: modelToUse },
+        { headers, timeout: 60000 },
+      );
+    } catch (e: any) {
+      const status = e?.response?.status;
+      if (status !== 404) throw e;
+      this.logger.warn(
+        `Image API /generate not found (404). Falling back to /generate-text-image on ${this.imageApiBaseUrl}`,
+      );
+      response = await axios.post(
+        `${this.imageApiBaseUrl}/generate-text-image`,
+        { prompt, model: modelToUse },
+        { headers, timeout: 120000 },
+      );
+    }
+
+    const data = response?.data;
+
+    let imageUrl =
+      data?.url ||
+      data?.image_url ||
+      data?.imageUrl ||
+      data?.s3_url ||
+      data?.images?.[0] ||
+      data?.result?.url ||
+      data?.result?.image_url;
+
+    if (!imageUrl) {
+      const b64 =
+        data?.image_base64 ||
+        data?.image ||
+        (Array.isArray(data?.images) && typeof data.images[0] === 'string' ? data.images[0] : null);
+      if (b64 && typeof b64 === 'string') {
+        imageUrl = this.persistBase64ImageToTemp(b64);
+      }
+    }
+
+    if (!imageUrl) {
+      throw new Error('No image returned from image generation API');
+    }
+
+    return String(imageUrl);
+  }
+
+  private isOpenAIImageModel(model?: string): boolean {
+    const m = String(model || '').toLowerCase();
+    return (
+      m === 'gpt' ||
+      m === 'openai' ||
+      m.includes('dall') ||
+      m.includes('gpt-image') ||
+      m.includes('gptimage')
+    );
+  }
+
+  private mapAspectRatioToOpenAiSize(
+    aspectRatio?: string,
+  ): '1024x1024' | '1024x1792' | '1792x1024' {
+    const ar = String(aspectRatio || '1:1');
+    if (ar === '9:16' || ar === '4:5' || ar === '2:3') return '1024x1792';
+    if (ar === '16:9' || ar === '3:2') return '1792x1024';
+    return '1024x1024';
+  }
+
+  private async generateImagesWithOpenAI(
+    prompt: string,
+    options?: { model?: string; variations?: number; aspectRatio?: string },
+  ): Promise<string[]> {
+    const apiKey = this.openaiApiKey;
+    if (!apiKey || apiKey === 'your_openai_api_key') {
+      throw new Error('OPENAI_API_KEY is not configured');
+    }
+
+    const n = Math.max(1, Math.min(options?.variations ?? 1, 4));
+    const model =
+      this.configService.get<string>('OPENAI_IMAGE_MODEL') ||
+      options?.model ||
+      'dall-e-2';
+    const size = this.mapAspectRatioToOpenAiSize(options?.aspectRatio);
+
+    let res: any;
+    try {
+      res = await axios.post(
+        'https://api.openai.com/v1/images/generations',
+        {
+          model,
+          prompt,
+          n,
+          size,
+          response_format: 'b64_json',
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            'Content-Type': 'application/json',
+          },
+          timeout: 120000,
+        },
+      );
+    } catch (e: any) {
+      const status = e?.response?.status;
+      const detail =
+        e?.response?.data?.error?.message ||
+        (typeof e?.response?.data === 'string' ? e.response.data : null) ||
+        e?.message ||
+        'OpenAI image generation failed';
+      this.logger.error(`OpenAI image generation error (${status || 'n/a'}): ${detail}`);
+      throw new HttpException(detail, status || HttpStatus.BAD_GATEWAY);
+    }
+
+    const data = res.data?.data;
+    if (!Array.isArray(data) || data.length === 0) {
+      throw new Error('OpenAI did not return any images');
+    }
+
+    const out: string[] = [];
+    for (const item of data) {
+      if (item?.url && typeof item.url === 'string') {
+        out.push(item.url);
+        continue;
+      }
+      if (item?.b64_json && typeof item.b64_json === 'string') {
+        out.push(this.persistBase64ImageToTemp(item.b64_json));
+        continue;
+      }
+    }
+    if (!out.length) throw new Error('OpenAI returned images in an unknown format');
+    return out;
+  }
+
   async generateImage(prompt: string): Promise<string> {
     try {
-      // Attempt A: legacy endpoint (/generate)
-      let response: any;
-      try {
-        response = await axios.post(
-          `${this.imageApiBaseUrl}/generate`,
-          {
-            prompt,
-            model: this.hfDefaultImageModel,
-          },
-          {
-            headers: {
-              Authorization: `Bearer ${this.hfToken}`,
-            },
-            timeout: 60000,
-          },
-        );
-      } catch (e: any) {
-        // Many deployments use the "Unified AI Generator" API instead.
-        // If /generate is missing, try /generate-text-image.
-        const status = e?.response?.status;
-        if (status !== 404) throw e;
-        this.logger.warn(
-          `Image API /generate not found (404). Falling back to /generate-text-image on ${this.imageApiBaseUrl}`,
-        );
-
-        response = await axios.post(
-          `${this.imageApiBaseUrl}/generate-text-image`,
-          { prompt },
-          { timeout: 120000 },
-        );
+      // Prefer OpenAI when configured (or explicitly requested by model flag)
+      // NOTE: We keep this method as single-image for backwards compatibility.
+      const preferOpenAi = this.isOpenAIImageModel(
+        this.configService.get<string>('IMAGE_PROVIDER') || '',
+      );
+      if (preferOpenAi && this.openaiApiKey) {
+        const imgs = await this.generateImagesWithOpenAI(prompt, { variations: 1 });
+        return imgs[0]!;
       }
 
-      const data = response?.data;
-
-      // URL-based responses
-      let imageUrl =
-        data?.url ||
-        data?.image_url ||
-        data?.imageUrl ||
-        data?.s3_url ||
-        data?.images?.[0] ||
-        data?.result?.url ||
-        data?.result?.image_url;
-
-      // Base64-based responses
-      if (!imageUrl) {
-        const b64 =
-          data?.image_base64 ||
-          data?.image ||
-          (Array.isArray(data?.images) && typeof data.images[0] === 'string' ? data.images[0] : null);
-
-        if (b64 && typeof b64 === 'string') {
-          imageUrl = this.persistBase64ImageToTemp(b64);
-        }
-      }
-
-      if (!imageUrl) {
-        throw new Error('No image returned from image generation API');
-      }
-
-      return String(imageUrl);
+      return await this.generateImageViaExternalApi(prompt);
     } catch (error: any) {
       this.logger.error('Image generation error', error.response?.data || error.message);
       const status = error?.response?.status;
@@ -567,14 +667,40 @@ export class AIService {
     prompt: string,
     variationsOrOptions: number | { variations?: number; [key: string]: any } = 1,
   ): Promise<string[]> {
-    const variations =
+    const opts =
       typeof variationsOrOptions === 'number'
-        ? variationsOrOptions
-        : variationsOrOptions?.variations ?? 1;
-    const n = Math.max(1, Math.min(variations || 1, 4));
+        ? { variations: variationsOrOptions }
+        : variationsOrOptions || {};
+
+    if (
+      this.isOpenAIImageModel(opts.model) ||
+      this.isOpenAIImageModel(this.configService.get<string>('IMAGE_PROVIDER'))
+    ) {
+      try {
+        return await this.generateImagesWithOpenAI(prompt, {
+          model: opts.model,
+          variations: opts.variations,
+          aspectRatio: opts.aspectRatio,
+        });
+      } catch (e: any) {
+        // If OpenAI is not enabled for images on the account, fall back to external generator.
+        this.logger.warn(
+          `Falling back to external image API after OpenAI failure: ${e?.message || e}`,
+        );
+        const fallbackModel = opts.model && this.isOpenAIImageModel(opts.model) ? 'qwen' : opts.model;
+        const n = Math.max(1, Math.min(opts.variations || 1, 4));
+        const out: string[] = [];
+        for (let i = 0; i < n; i += 1) {
+          out.push(await this.generateImageViaExternalApi(prompt, fallbackModel));
+        }
+        return out;
+      }
+    }
+
+    const n = Math.max(1, Math.min(opts.variations || 1, 4));
     const out: string[] = [];
     for (let i = 0; i < n; i += 1) {
-      out.push(await this.generateImage(prompt));
+      out.push(await this.generateImageViaExternalApi(prompt, opts.model));
     }
     return out;
   }
@@ -732,14 +858,23 @@ export class AIService {
   ): Promise<string> {
     try {
       if (options.model === 'veo3') {
-        const durationSeconds = options.durationSeconds || 6;
-        const aspectRatio =
-          (options.platform || '').toLowerCase() === 'instagram' ? '9:16' : '16:9';
-        return await this.generateVeo3Video(prompt, {
-          durationSeconds,
-          images: options.images,
-          aspectRatio,
-        });
+        // If Veo isn't configured, fall back to hosted generator so the feature still works in dev.
+        const storageUriBase = this.configService.get<string>('VEO3_OUTPUT_STORAGE_URI');
+        const gcpProject = this.configService.get<string>('GCP_PROJECT_ID');
+        if (!storageUriBase || !String(storageUriBase).startsWith('gs://') || !gcpProject) {
+          this.logger.warn(
+            'Veo3 selected but GCP_PROJECT_ID/VEO3_OUTPUT_STORAGE_URI not configured; falling back to hosted generator.',
+          );
+        } else {
+          const durationSeconds = options.durationSeconds || 6;
+          const aspectRatio =
+            (options.platform || '').toLowerCase() === 'instagram' ? '9:16' : '16:9';
+          return await this.generateVeo3Video(prompt, {
+            durationSeconds,
+            images: options.images,
+            aspectRatio,
+          });
+        }
       }
 
       // Map frontend model names to API expected values ('local' or 'hf')
@@ -782,6 +917,13 @@ export class AIService {
         video_type: externalVideoType,
         platform: options.platform || 'instagram',
       };
+
+      // Preserve upstream compatibility (model=local) while still passing the UI model choice.
+      // The hosted generator can optionally use these hints to route WAN vs LTX.
+      if (options.model === 'wan' || options.model === 'ltx') {
+        payload.video_model = options.model;
+        payload.variant = options.model;
+      }
 
       if (options.images && options.images.length > 0) {
         payload.images = options.images;

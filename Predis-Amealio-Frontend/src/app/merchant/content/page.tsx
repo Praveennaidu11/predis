@@ -25,6 +25,14 @@ import { Input } from '@/components/ui/input';
 import { TimePickerCompact } from '@/components/ui/time-picker-compact';
 import { toast } from 'sonner';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+  Pagination,
+  PaginationContent,
+  PaginationItem,
+  PaginationLink,
+  PaginationNext,
+  PaginationPrevious,
+} from '@/components/ui/pagination';
 
 const formatTime = (timeString: string): string => {
   const [hours, minutes] = timeString.split(':').map(Number);
@@ -40,6 +48,13 @@ export default function ContentLibraryPage() {
   const [trashItems, setTrashItems] = useState<ContentItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState<'active' | 'trash'>('active');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [tagFilter, setTagFilter] = useState('');
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [activeTotal, setActiveTotal] = useState(0);
+  const [trashTotal, setTrashTotal] = useState(0);
+  const limit = 12;
 
   const [selectedItem, setSelectedItem] = useState<ContentItem | null>(null);
   const [viewOpen, setViewOpen] = useState(false);
@@ -85,20 +100,73 @@ export default function ContentLibraryPage() {
 
   useEffect(() => {
     fetchContent();
-  }, []);
+  }, [view, page]);
 
   const fetchContent = async () => {
+    const q = searchQuery.trim() || undefined;
+    const tag = tagFilter.trim() || undefined;
+
     try {
       setLoading(true);
-      const [active, trash] = await Promise.all([
-        contentApi.getContent('all'),
-        contentApi.getContent('all', { trash: true }),
+      const [activeRes, trashRes] = await Promise.all([
+        contentApi.getContentPaginated(
+          {
+            filter: 'all',
+            q,
+            tag,
+            page: view === 'active' ? page : 1,
+            limit: view === 'active' ? limit : 1,
+          },
+          { trash: false },
+        ),
+        contentApi.getContentPaginated(
+          {
+            filter: 'all',
+            q,
+            tag,
+            page: view === 'trash' ? page : 1,
+            limit: view === 'trash' ? limit : 1,
+          },
+          { trash: true },
+        ),
       ]);
-      setContentItems(active.data);
-      setTrashItems(trash.data);
+
+      setActiveTotal(activeRes.data.total ?? 0);
+      setTrashTotal(trashRes.data.total ?? 0);
+
+      if (view === 'active') {
+        setContentItems(activeRes.data.data || []);
+        setTotalPages(activeRes.data.totalPages || 1);
+      } else {
+        setTrashItems(trashRes.data.data || []);
+        setTotalPages(trashRes.data.totalPages || 1);
+      }
     } catch (error: any) {
       console.error('Failed to fetch content:', error);
       console.error('Error details:', error?.response?.data);
+      try {
+        const [active, trash] = await Promise.all([
+          contentApi.getContent({ filter: 'all', q, tag, limit: 500 }),
+          contentApi.getContent({ filter: 'all', q, tag, limit: 500 }, { trash: true }),
+        ]);
+        const activeItems = Array.isArray(active.data) ? active.data : [];
+        const trashItemsArr = Array.isArray(trash.data) ? trash.data : [];
+        setActiveTotal(activeItems.length);
+        setTrashTotal(trashItemsArr.length);
+        if (view === 'active') {
+          const start = (page - 1) * limit;
+          setContentItems(activeItems.slice(start, start + limit));
+          setTotalPages(Math.max(1, Math.ceil(activeItems.length / limit)));
+        } else {
+          const start = (page - 1) * limit;
+          setTrashItems(trashItemsArr.slice(start, start + limit));
+          setTotalPages(Math.max(1, Math.ceil(trashItemsArr.length / limit)));
+        }
+      } catch (e2) {
+        toast.error('Failed to load content', {
+          description: error?.response?.data?.message || error?.message,
+        });
+      }
     } finally {
       setLoading(false);
     }
@@ -145,12 +213,8 @@ export default function ContentLibraryPage() {
           onClick: async () => {
             try {
               await contentApi.restoreContent(deleted.id);
-              const [active, trash] = await Promise.all([
-                contentApi.getContent('all'),
-                contentApi.getContent('all', { trash: true }),
-              ]);
-              setContentItems(active.data);
-              setTrashItems(trash.data);
+              setPage(1);
+              await fetchContent();
               toast.success('Restored');
             } catch (e: any) {
               toast.error(e?.response?.data?.message || 'Restore failed');
@@ -158,7 +222,8 @@ export default function ContentLibraryPage() {
           },
         },
       });
-      contentApi.getContent('all', { trash: true }).then((r) => setTrashItems(r.data));
+      setPage(1);
+      await fetchContent();
     } catch (error) {
       console.error('Failed to delete content:', error);
     } finally {
@@ -169,12 +234,8 @@ export default function ContentLibraryPage() {
   const handleRestore = async (item: ContentItem) => {
     try {
       await contentApi.restoreContent(item.id);
-      const [active, trash] = await Promise.all([
-        contentApi.getContent('all'),
-        contentApi.getContent('all', { trash: true }),
-      ]);
-      setContentItems(active.data);
-      setTrashItems(trash.data);
+      setPage(1);
+      await fetchContent();
       toast.success('Content restored');
     } catch (e: any) {
       toast.error(e?.response?.data?.message || 'Restore failed');
@@ -270,20 +331,50 @@ export default function ContentLibraryPage() {
                   value="active"
                   className="border-0 rounded-full bg-muted/40 hover:bg-muted px-3 py-1.5 text-sm data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm"
                 >
-                  Active ({contentItems.length})
+                  Active ({activeTotal})
                 </TabsTrigger>
                 <TabsTrigger
                   value="trash"
                   className="border-0 rounded-full bg-muted/40 hover:bg-muted px-3 py-1.5 text-sm data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm"
                 >
-                  Trash ({trashItems.length})
+                  Trash ({trashTotal})
                 </TabsTrigger>
               </TabsList>
             </Tabs>
           </div>
-          <Button className="bg-purple-600 hover:bg-purple-700" onClick={handleCreateNew}>
-            Create New
-          </Button>
+          <div className="flex flex-col md:flex-row items-stretch md:items-center gap-2">
+            <Input
+              value={searchQuery}
+              onChange={(e) => {
+                setSearchQuery(e.target.value);
+                setPage(1);
+              }}
+              placeholder="Search prompt / generated text..."
+              className="md:w-64"
+            />
+            <Input
+              value={tagFilter}
+              onChange={(e) => {
+                setTagFilter(e.target.value);
+                setPage(1);
+              }}
+              placeholder="Filter by tag (optional)"
+              className="md:w-48"
+            />
+            <Button
+              variant="outline"
+              onClick={() => {
+                setPage(1);
+                fetchContent();
+              }}
+              disabled={loading}
+            >
+              Apply
+            </Button>
+            <Button className="bg-purple-600 hover:bg-purple-700" onClick={handleCreateNew}>
+              Create New
+            </Button>
+          </div>
         </div>
 
         {view === 'active' && contentItems.length === 0 ? (
@@ -381,6 +472,20 @@ export default function ContentLibraryPage() {
                       </div>
                     )}
 
+                    {/* Tags */}
+                    {Array.isArray(item.tags) && item.tags.length > 0 && (
+                      <div className="mb-3 flex flex-wrap gap-1">
+                        {item.tags.slice(0, 5).map((t) => (
+                          <span
+                            key={t}
+                            className="text-[11px] bg-purple-50 text-purple-700 px-2 py-0.5 rounded-full"
+                          >
+                            {t}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+
                     {/* Action Buttons */}
                     <div className="flex gap-2">
                       <Button
@@ -422,6 +527,18 @@ export default function ContentLibraryPage() {
               <Card key={item.id} className="overflow-hidden">
                 <CardContent className="p-4 space-y-3">
                   <div className="text-sm font-medium line-clamp-2">{getPreviewText(item)}</div>
+                  {Array.isArray(item.tags) && item.tags.length > 0 && (
+                    <div className="flex flex-wrap gap-1">
+                      {item.tags.slice(0, 5).map((t) => (
+                        <span
+                          key={t}
+                          className="text-[11px] bg-purple-50 text-purple-700 px-2 py-0.5 rounded-full"
+                        >
+                          {t}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                   <div className="text-xs text-gray-500">
                     This content is in Trash. Restore to make it active again.
                   </div>
@@ -432,6 +549,30 @@ export default function ContentLibraryPage() {
                 </CardContent>
               </Card>
             ))}
+          </div>
+        )}
+
+        {totalPages > 1 && (
+          <div className="mt-8 flex justify-center">
+            <Pagination>
+              <PaginationContent>
+                <PaginationItem>
+                  <PaginationPrevious
+                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                    className={page <= 1 ? 'pointer-events-none opacity-50' : ''}
+                  />
+                </PaginationItem>
+                <PaginationItem>
+                  <PaginationLink isActive>{page}</PaginationLink>
+                </PaginationItem>
+                <PaginationItem>
+                  <PaginationNext
+                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                    className={page >= totalPages ? 'pointer-events-none opacity-50' : ''}
+                  />
+                </PaginationItem>
+              </PaginationContent>
+            </Pagination>
           </div>
         )}
 

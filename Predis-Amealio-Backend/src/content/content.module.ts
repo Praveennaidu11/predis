@@ -12,15 +12,22 @@ import { RedisService } from '../common/redis.service';
 import { AIModule } from '../integrations/ai/ai.module';
 import { SocialModule } from '../social/social.module';
 import { ContentSchedulerService } from './content-scheduler.service';
+import { VideoModule } from '../video/video.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([Content, Brand, User, Analytics, PromptHistory]),
     AIModule,
     SocialModule,
+    VideoModule,
   ],
   controllers: [ContentController],
-  providers: [ContentService, PromptHistoryService, RedisService],
+  providers: [
+    ContentService,
+    PromptHistoryService,
+    RedisService,
+    ContentSchedulerService,
+  ],
   exports: [ContentService, PromptHistoryService],
 })
 export class ContentModule {}

@@ -162,6 +162,7 @@ function CreateContentPageClient() {
    const [brands, setBrands] = useState<Brand[]>([]);
    const [brandsLoading, setBrandsLoading] = useState(false);
    const [brandId, setBrandId] = useState<string>(''); // optional
+  const [tagsInput, setTagsInput] = useState<string>(''); // comma-separated
  
    const [prompt, setPrompt] = useState(''); 
    const [output, setOutput] = useState<string | null>(null); 
@@ -273,6 +274,9 @@ function CreateContentPageClient() {
          if ((item as any).brandId) {
            setBrandId(String((item as any).brandId));
          }
+        if (Array.isArray((item as any).tags)) {
+          setTagsInput(((item as any).tags as string[]).join(', '));
+        }
  
          setPrompt(item.prompt || ''); 
  
@@ -788,12 +792,19 @@ function CreateContentPageClient() {
      } 
  
      try { 
-       await contentApi.saveContent({ 
-         type: contentType, 
-         platform, 
-         prompt, 
+      const tags = tagsInput
+        .split(',')
+        .map((t) => t.trim())
+        .filter(Boolean);
+
+      const payload: any = {
+        type: contentType,
+        platform,
+        prompt,
         brandId: brandId || undefined,
-         generatedImage: contentType === 'image' ? output : undefined, 
+        tags: tags.length ? tags : undefined,
+        status: 'draft',
+        generatedImage: contentType === 'image' ? output : undefined,
         generatedVideo:
           contentType === 'video' &&
           (output.startsWith('data:video') || output.startsWith('http'))
@@ -806,9 +817,15 @@ function CreateContentPageClient() {
             : contentType === 'text'
               ? output
               : undefined,
-         status: 'draft', 
-       }); 
-       toast.success('Saved to library!'); 
+      };
+
+      if (isEditing && loadedItem?.id) {
+        await contentApi.updateContent(loadedItem.id, payload);
+        toast.success('Updated content!');
+      } else {
+        await contentApi.saveContent(payload);
+        toast.success('Saved to library!');
+      }
      } catch (err: any) { 
        toast.error(err.message || 'Failed to save content'); 
      } 
@@ -826,6 +843,7 @@ function CreateContentPageClient() {
      setVideoType(null); 
      setDuration(null); 
      setBrandId('');
+    setTagsInput('');
      setPrompt(''); 
      setOutput(null); 
    }; 
@@ -958,6 +976,28 @@ function CreateContentPageClient() {
                     </option>
                   ))}
                 </select>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* STEP 2.6 — Tags (Optional) */}
+          {canShowStep3 && (
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base font-semibold">
+                  Step 2.6: Tags (optional)
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                <div className="text-xs text-gray-500">
+                  Add comma-separated tags to help you search and organize content later.
+                </div>
+                <Input
+                  value={tagsInput}
+                  onChange={(e) => setTagsInput(e.target.value)}
+                  placeholder="e.g. promo, summer, restaurant"
+                  className="h-10 rounded-xl text-sm border-gray-200 focus:border-purple-400 focus:ring-purple-100 transition-all"
+                />
               </CardContent>
             </Card>
           )}
@@ -1206,10 +1246,14 @@ function CreateContentPageClient() {
                        <div className="text-xs font-semibold text-gray-900">Qwen</div> 
                      </button> 
                      <button 
-                       disabled 
-                       className="flex-1 p-2 border-2 rounded-full bg-gray-100 opacity-50 cursor-not-allowed" 
+                      onClick={() => setImageModel('gpt')}
+                      className={`flex-1 p-2 border-2 rounded-full transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-purple-500 ${
+                        imageModel === 'gpt'
+                          ? 'border-purple-500 bg-purple-50'
+                          : 'border-gray-200 hover:border-purple-400 hover:bg-purple-50'
+                      }`}
                      > 
-                       <div className="text-xs font-semibold text-gray-500">GPT</div> 
+                      <div className="text-xs font-semibold text-gray-900">GPT</div> 
                      </button> 
                      <button 
                       onClick={() => setImageModel('gemini')}
@@ -1237,10 +1281,14 @@ function CreateContentPageClient() {
                        <div className="text-xs font-semibold text-gray-900">WAN</div> 
                      </button> 
                      <button 
-                       disabled 
-                       className="flex-1 p-2 border-2 rounded-full bg-gray-100 opacity-50 cursor-not-allowed" 
+                      onClick={() => setVideoModel('ltx')}
+                      className={`flex-1 p-2 border-2 rounded-full transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-purple-500 ${
+                        videoModel === 'ltx'
+                          ? 'border-purple-500 bg-purple-50'
+                          : 'border-gray-200 hover:border-purple-400 hover:bg-purple-50'
+                      }`}
                      > 
-                       <div className="text-xs font-semibold text-gray-500">LTX</div> 
+                      <div className="text-xs font-semibold text-gray-900">LTX</div> 
                      </button> 
                     <button
                       onClick={() => setVideoModel('veo3')}
