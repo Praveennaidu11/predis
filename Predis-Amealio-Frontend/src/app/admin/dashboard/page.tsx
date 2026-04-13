@@ -5,6 +5,7 @@ import DashboardLayout from '@/components/layout/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Users, FileText, TrendingUp, DollarSign } from 'lucide-react';
 import { toast } from 'sonner';
+import apiClient from '@/lib/api';
 
 export default function AdminDashboardPage() {
   const [stats, setStats] = useState<any>(null);
@@ -16,15 +17,7 @@ export default function AdminDashboardPage() {
 
   const fetchDashboardData = async () => {
     try {
-      const response = await fetch('/api/admin/stats', {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
-        },
-      });
-
-      if (!response.ok) throw new Error('Failed to fetch');
-
-      const data = await response.json();
+      const { data } = await apiClient.get('/admin/stats');
       setStats(data);
     } catch (error: any) {
       toast.error('Error', {

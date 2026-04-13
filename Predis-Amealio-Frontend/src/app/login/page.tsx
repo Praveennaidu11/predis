@@ -5,8 +5,9 @@ type SearchParams = Promise<{ [key: string]: string | string[] | undefined }>;
 
 export default async function LoginPage(props: { searchParams: SearchParams }) {
   const searchParams = await props.searchParams;
-  const roleParam = searchParams.role as string;
-  const initialRole =
+  const raw = searchParams.role;
+  const roleParam = Array.isArray(raw) ? raw[0] : raw;
+  const roleFromUrl =
     roleParam === 'admin' || roleParam === 'merchant' ? roleParam : 'merchant';
 
   return (
@@ -18,7 +19,8 @@ export default async function LoginPage(props: { searchParams: SearchParams }) {
           </div>
         }
       >
-        <LoginForm initialRole={initialRole} />
+        {/* Remount when URL ?role= changes; do not sync role from props in an effect or tab clicks get overwritten. */}
+        <LoginForm key={roleFromUrl} initialRole={roleFromUrl} />
       </Suspense>
     </div>
   );

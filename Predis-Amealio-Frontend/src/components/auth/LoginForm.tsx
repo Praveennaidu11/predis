@@ -118,7 +118,10 @@ export default function LoginForm({ initialRole = 'merchant' }: LoginFormProps) 
         window.location.href = role === 'admin' ? '/admin/dashboard' : '/merchant/dashboard';
       }
     } catch (error: any) {
-      toast.error('Login failed', { description: error.response?.data?.message || 'Check credentials' });
+      const apiMsg = error.response?.data?.message;
+      const description =
+        typeof apiMsg === 'string' ? apiMsg : Array.isArray(apiMsg) ? apiMsg.join(' ') : 'Check credentials';
+      toast.error('Login failed', { description });
     } finally {
       setIsLoading(false);
     }

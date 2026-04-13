@@ -15,6 +15,7 @@
     "migration:revert": "typeorm-ts-node-commonjs migration:revert -d src/common/database/data-source.ts --transaction none",
     "migration:show": "typeorm-ts-node-commonjs migration:show -d src/common/database/data-source.ts",
     "seed": "ts-node src/common/database/seed.ts",
+    "promote-admin": "ts-node src/common/database/promote-admin.ts",
     "test:db": "ts-node src/scripts/test-db-connection.ts",
     "check:requirements": "ts-node src/scripts/test-db-connection.ts",
     "schema:check": "ts-node src/scripts/schema-drift-check.ts"

@@ -140,7 +140,8 @@ export default function SignupForm({ initialRole = 'merchant' }: SignupFormProps
     }
     setIsLoading(true);
     try {
-      await apiClient.post("/auth/register", { fullName, email, password, companyName, role: userType });
+      // RegisterDto does not accept `role`; backend always creates merchants for email signup.
+      await apiClient.post("/auth/register", { fullName, email, password, companyName });
       toast.success("OTP sent");
       setTimer(120);
       setShowOtpDialog(true);

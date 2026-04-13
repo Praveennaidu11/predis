@@ -82,11 +82,16 @@ export class AuthService {
       throw new UnauthorizedException('Invalid password');
     }
 
-    if (dto.role && user.role && dto.role !== user.role) {
-      throw new UnauthorizedException(`Invalid role for this account`);
-    }
+    // Session role follows the login UI (Merchant vs Admin tab), not only the row in `users.role`,
+    // so the same credentials can open either dashboard as selected.
+    const sessionRole: 'merchant' | 'admin' =
+      dto.role === 'merchant' || dto.role === 'admin'
+        ? dto.role
+        : user.role === 'admin' || user.role === 'merchant'
+          ? (user.role as 'merchant' | 'admin')
+          : 'merchant';
 
-    const token = this.generateToken(user.id, user.email, user.role);
+    const token = this.generateToken(user.id, user.email, sessionRole);
 
     return {
       token,
@@ -95,7 +100,7 @@ export class AuthService {
         email: user.email,
         fullName: user.fullName,
         companyName: user.companyName,
-        role: user.role,
+        role: sessionRole,
       },
     };
   }

@@ -12,43 +12,40 @@ async function seed() {
 
     const userRepository = dataSource.getRepository(User);
 
-    // Check if users already exist
+    // Create each demo user only if missing (older seeds exited early when merchant existed,
+    // so many DBs never got admin@amealio.com — admin login then always failed).
     const existingMerchant = await userRepository.findOne({
       where: { email: 'merchant@amealio.com' },
     });
-
-    if (existingMerchant) {
-      // console.log('ℹ️  Demo users already exist. Skipping seed.');
-      await dataSource.destroy();
-      return;
+    if (!existingMerchant) {
+      const merchantPassword = await bcrypt.hash('merchant123', 10);
+      const merchant = userRepository.create({
+        email: 'merchant@amealio.com',
+        passwordHash: merchantPassword,
+        fullName: 'Demo Merchant',
+        companyName: 'Amealio Inc',
+        role: 'merchant',
+        subscriptionTier: 'pro',
+        credits: 500,
+      });
+      await userRepository.save(merchant);
     }
 
-    // Create demo merchant
-    const merchantPassword = await bcrypt.hash('merchant123', 10);
-    const merchant = userRepository.create({
-      email: 'merchant@amealio.com',
-      passwordHash: merchantPassword,
-      fullName: 'Demo Merchant',
-      companyName: 'Amealio Inc',
-      role: 'merchant',
-      subscriptionTier: 'pro',
-      credits: 500,
+    const existingAdmin = await userRepository.findOne({
+      where: { email: 'admin@amealio.com' },
     });
-    await userRepository.save(merchant);
-    // console.log('✅ Created demo merchant: merchant@amealio.com / merchant123');
-
-    // Create demo admin
-    const adminPassword = await bcrypt.hash('admin123', 10);
-    const admin = userRepository.create({
-      email: 'admin@amealio.com',
-      passwordHash: adminPassword,
-      fullName: 'Admin User',
-      role: 'admin',
-      subscriptionTier: 'enterprise',
-      credits: 1000,
-    });
-    await userRepository.save(admin);
-    // console.log('✅ Created demo admin: admin@amealio.com / admin123');
+    if (!existingAdmin) {
+      const adminPassword = await bcrypt.hash('admin123', 10);
+      const admin = userRepository.create({
+        email: 'admin@amealio.com',
+        passwordHash: adminPassword,
+        fullName: 'Admin User',
+        role: 'admin',
+        subscriptionTier: 'enterprise',
+        credits: 1000,
+      });
+      await userRepository.save(admin);
+    }
 
     // console.log('\n🎉 Database seeded successfully!');
     // console.log('\nDemo Credentials:');
