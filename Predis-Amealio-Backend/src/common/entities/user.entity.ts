@@ -20,11 +20,26 @@ export class User {
   @Column({ unique: true })
   email: string;
 
+  @Column({ nullable: true })
+  mobile: string;
+
+  @Column({ name: 'country_code', nullable: true })
+  countryCode: string;
+
   @Column({ name: 'password_hash', nullable: true })
   passwordHash: string;
 
+  @Column({ name: 'first_name', nullable: true })
+  firstName: string;
+
+  @Column({ name: 'last_name', nullable: true })
+  lastName: string;
+
   @Column({ name: 'full_name', nullable: true })
   fullName: string;
+
+  @Column({ name: 'user_verified', default: false })
+  userVerified: boolean;
 
   @Column({ default: 'merchant' })
   role: string;
@@ -43,6 +58,9 @@ export class User {
 
   @Column({ name: 'company_name', nullable: true })
   companyName: string;
+
+  @Column({ name: 'device_info', type: 'jsonb', nullable: true })
+  deviceInfo: any;
 
   @Column({ default: 100 })
   credits: number;

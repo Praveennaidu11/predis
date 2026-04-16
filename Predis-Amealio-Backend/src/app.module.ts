@@ -13,6 +13,7 @@ import { AIModule } from './integrations/ai/ai.module';
 import { EmailModule } from './integrations/email/email.module';
 import { RazorpayModule } from './integrations/razorpay/razorpay.module';
 import { BrandModule } from './brand/brand.module';
+import { CommonAuthenticationModule } from './common-authentication/common-authentication.module';
 import { DatabaseService } from './common/database/database.service';
 import { RedisService } from './common/redis.service';
 import * as entities from './common/entities';
@@ -78,6 +79,7 @@ const validateEnv = (env: Record<string, any>) => {
     AIModule,
     EmailModule,
     RazorpayModule,
+    CommonAuthenticationModule,
   ],
   providers: [DatabaseService, RedisService],
 })

@@ -25,6 +25,7 @@ async function bootstrap() {
   app.enableCors({
     origin: process.env.CORS_ORIGIN?.split(',') || ['http://localhost:5000'],
     credentials: true,
+    exposedHeaders: ['Authorization'],
   });
 
   // Global validation pipe

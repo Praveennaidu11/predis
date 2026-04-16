@@ -1,13 +1,7 @@
 import type { Metadata, Viewport } from "next";
-import { Inter } from "next/font/google";
 import "./globals.css";
 import { AuthProvider } from '@/contexts/AuthContext';
 import { Toaster } from 'sonner';
-
-const inter = Inter({
-  subsets: ["latin"],
-  variable: "--font-inter",
-});
 
 export const metadata: Metadata = {
   title: "Amealio - AI Social Media Management",
@@ -46,7 +40,13 @@ export default function RootLayout({
         <meta name="format-detection" content="telephone=no" />
         <meta name="mobile-web-app-capable" content="yes" />
       </head>
-      <body className={`${inter.variable} font-sans antialiased`} style={{ fontFamily: 'Inter, sans-serif' }}>
+      <body
+        className="font-sans antialiased"
+        style={{
+          fontFamily:
+            'ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji"',
+        }}
+      >
         <AuthProvider>
           {children}
           <Toaster position="top-right" richColors />

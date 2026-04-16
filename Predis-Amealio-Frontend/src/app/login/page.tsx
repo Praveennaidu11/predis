@@ -11,10 +11,10 @@ export default async function LoginPage(props: { searchParams: SearchParams }) {
     roleParam === 'admin' || roleParam === 'merchant' ? roleParam : 'merchant';
 
   return (
-    <div className="min-h-screen bg-background flex items-center justify-center p-4">
+    <div className="min-h-screen bg-muted/30 flex items-center justify-center p-4">
       <Suspense
         fallback={
-          <div className="min-h-screen bg-background flex items-center justify-center p-4">
+          <div className="min-h-screen bg-muted/30 flex items-center justify-center p-4">
             Loading...
           </div>
         }
