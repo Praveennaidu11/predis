@@ -29,8 +29,15 @@ export class CommonAuthenticationController {
     @Query('user_id') userId: string,
     @Query('OTP') otp: string,
     @Res({ passthrough: true }) res: Response,
+    @Query('mobile_number') mobileNumber?: string,
+    @Query('country_code') countryCode?: string,
+    @Query('role') role?: 'merchant' | 'admin',
   ) {
-    const { token } = await this.commonAuth.verifyOtp(userId, otp);
+    const { token } = await this.commonAuth.verifyOtp(userId, otp, {
+      mobileNumber,
+      countryCode,
+      role,
+    });
     res.setHeader('Authorization', `Bearer ${token}`);
     return { success: true, token };
   }

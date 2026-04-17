@@ -4,6 +4,11 @@ import * as jwt from 'jsonwebtoken';
 
 @Injectable()
 export class JwtAuthGuard implements CanActivate {
+  private isUuid(value: unknown): boolean {
+    const v = String(value || '').trim();
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v);
+  }
+
   private get upstreamBaseUrl(): string {
     const raw =
       process.env.AMEALIO_AUTH_BASE_URL ||
@@ -37,6 +42,9 @@ export class JwtAuthGuard implements CanActivate {
           source: 'local',
         };
         if (!req.user.userId) throw new Error('Missing sub');
+        if (!this.isUuid(req.user.userId)) {
+          throw new UnauthorizedException('Invalid token');
+        }
         return true;
       } catch {
         // fall through to upstream validation
@@ -63,6 +71,10 @@ export class JwtAuthGuard implements CanActivate {
         user: upstreamUser,
         source: 'upstream',
       };
+      if (!this.isUuid(req.user.userId)) {
+        // Prevent DB UUID crashes; upstream IDs are not valid for Predis tables.
+        throw new UnauthorizedException('Invalid token');
+      }
       return true;
     } catch (e: any) {
       const msg =

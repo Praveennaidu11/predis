@@ -87,12 +87,13 @@ export default function LoginForm({ initialRole = 'merchant' }: LoginFormProps) 
   const persistSessionAndRedirect = async (token: string) => {
     localStorage.setItem('token', token);
     try {
-      const validated = await apiClient.get('/validate-token');
-      const user = validated.data?.user;
-      if (user) {
-        localStorage.setItem('user', JSON.stringify(user));
-        window.dispatchEvent(new Event('storage'));
-      }
+      // For OTP login we receive a Predis-local JWT. Calling `/validate-token` can hit
+      // an upstream validator (and 401 will trigger the axios interceptor logout).
+      // Use Predis `/auth/me` to hydrate the session instead.
+      const me = await apiClient.get('/auth/me');
+      const user = me.data;
+      if (user) localStorage.setItem('user', JSON.stringify(user));
+      window.dispatchEvent(new Event('storage'));
     } catch {
       // If validate-token fails, still keep token; user can retry on next request.
     }
@@ -134,7 +135,13 @@ export default function LoginForm({ initialRole = 'merchant' }: LoginFormProps) 
     setIsOtpLoading(true);
     try {
       const res = await apiClient.get('/otp-authentication', {
-        params: { user_id: userId, OTP: otp },
+        params: {
+          user_id: userId,
+          OTP: otp,
+          mobile_number: mobileNumber,
+          country_code: countryCode,
+          role,
+        },
       });
       const authHeader: string | undefined =
         res.headers?.authorization || res.headers?.Authorization || res.headers?.AUTHORIZATION;
